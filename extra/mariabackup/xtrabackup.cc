@@ -382,7 +382,7 @@ datafiles_iter_new(fil_system_t *f_system)
 	datafiles_iter_t *it;
 
 	it = static_cast<datafiles_iter_t *>(malloc(sizeof(datafiles_iter_t)));
-	it->mutex = os_mutex_create();
+	pthread_mutex_init(&it->mutex, NULL);
 
 	it->system = f_system;
 	it->space = NULL;
@@ -397,7 +397,7 @@ datafiles_iter_next(datafiles_iter_t *it)
 {
 	fil_node_t *new_node;
 
-	os_mutex_enter(it->mutex);
+	pthread_mutex_lock(&it->mutex);
 
 	if (it->node == NULL) {
 		if (it->started)
@@ -414,7 +414,7 @@ datafiles_iter_next(datafiles_iter_t *it)
 		UT_LIST_GET_NEXT(space_list, it->space);
 
 	while (it->space != NULL &&
-	       (it->space->purpose != FIL_TABLESPACE ||
+	       (it->space->purpose != FIL_TYPE_TABLESPACE ||
 		UT_LIST_GET_LEN(it->space->chain) == 0))
 		it->space = UT_LIST_GET_NEXT(space_list, it->space);
 	if (it->space == NULL)
@@ -424,7 +424,7 @@ datafiles_iter_next(datafiles_iter_t *it)
 
 end:
 	new_node = it->node;
-	os_mutex_exit(it->mutex);
+	pthread_mutex_unlock(&it->mutex);
 
 	return new_node;
 }
@@ -432,7 +432,7 @@ end:
 void
 datafiles_iter_free(datafiles_iter_t *it)
 {
-	os_mutex_free(it->mutex);
+	pthread_mutex_destroy(&it->mutex);
 	free(it);
 }
 
@@ -442,7 +442,7 @@ typedef struct {
 	datafiles_iter_t 	*it;
 	uint			num;
 	uint			*count;
-	os_ib_mutex_t		count_mutex;
+	pthread_mutex_t		count_mutex;
 	os_thread_id_t		id;
 } data_thread_ctxt_t;
 
@@ -950,8 +950,8 @@ struct my_option xb_server_options[] =
 #endif /* BTR_CUR_HASH_ADAPT */
   {"innodb_autoextend_increment", OPT_INNODB_AUTOEXTEND_INCREMENT,
    "Data file autoextend increment in megabytes",
-   (G_PTR*) &srv_auto_extend_increment,
-   (G_PTR*) &srv_auto_extend_increment,
+   (G_PTR*) &sys_tablespace_auto_extend_increment,
+   (G_PTR*) &sys_tablespace_auto_extend_increment,
    0, GET_ULONG, REQUIRED_ARG, 8L, 1L, 1000L, 0, 1L, 0},
   {"innodb_buffer_pool_size", OPT_INNODB_BUFFER_POOL_SIZE,
    "The size of the memory buffer InnoDB uses to cache data and indexes of its tables.",
@@ -1063,11 +1063,7 @@ Disable with --skip-innodb-doublewrite.", (G_PTR*) &innobase_use_doublewrite,
    "INNODB, STRICT_INNODB, NONE, STRICT_NONE]", &srv_checksum_algorithm,
    &srv_checksum_algorithm, &innodb_checksum_algorithm_typelib, GET_ENUM,
    REQUIRED_ARG, SRV_CHECKSUM_ALGORITHM_INNODB, 0, 0, 0, 0, 0},
-  {"innodb_log_checksum_algorithm", OPT_INNODB_LOG_CHECKSUM_ALGORITHM,
-  "The algorithm InnoDB uses for log checksumming. [CRC32, STRICT_CRC32, "
-   "INNODB, STRICT_INNODB, NONE, STRICT_NONE]", &srv_log_checksum_algorithm,
-   &srv_log_checksum_algorithm, &innodb_checksum_algorithm_typelib, GET_ENUM,
-   REQUIRED_ARG, SRV_CHECKSUM_ALGORITHM_INNODB, 0, 0, 0, 0, 0},
+
   {"innodb_undo_directory", OPT_INNODB_UNDO_DIRECTORY,
    "Directory where undo tablespace files live, this path can be absolute.",
    &srv_undo_dir, &srv_undo_dir, 0, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0,
@@ -1293,13 +1289,6 @@ xb_get_one_option(int optid,
     ADD_PRINT_PARAM_OPT(innodb_checksum_algorithm_names[srv_checksum_algorithm]);
     break;
 
-  case OPT_INNODB_LOG_CHECKSUM_ALGORITHM:
-
-    ut_a(srv_log_checksum_algorithm <= SRV_CHECKSUM_ALGORITHM_STRICT_NONE);
-
-    ADD_PRINT_PARAM_OPT(innodb_checksum_algorithm_names[srv_log_checksum_algorithm]);
-    break;
-
   case OPT_INNODB_BUFFER_POOL_FILENAME:
 
     ADD_PRINT_PARAM_OPT(innobase_buffer_pool_filename);
@@ -1378,19 +1367,19 @@ static
 ibool
 xb_init_log_block_size(void)
 {
-	srv_log_block_size = 0;
+	srv_log_write_ahead_size = 0;
 	if (innobase_log_block_size != 512) {
 		uint	n_shift = (uint)get_bit_shift(innobase_log_block_size);;
 
 		if (n_shift > 0) {
-			srv_log_block_size = (ulint)(1LL << n_shift);
+			srv_log_write_ahead_size = (ulint)(1LL << n_shift);
 			msg("InnoDB: The log block size is set to %lu.\n",
-			    srv_log_block_size);
+			    srv_log_write_ahead_size);
 		}
 	} else {
-		srv_log_block_size = 512;
+		srv_log_write_ahead_size = 512;
 	}
-	if (!srv_log_block_size) {
+	if (!srv_log_write_ahead_size) {
 		msg("InnoDB: Error: %lu is not valid value for "
 		    "innodb_log_block_size.\n", innobase_log_block_size);
 		return FALSE;
@@ -1528,7 +1517,7 @@ mem_free_and_error:
 			char *p;
 
 			p = srv_data_file_names[i];
-			while ((p = strchr(p, SRV_PATH_SEPARATOR)) != NULL)
+			while ((p = strchr(p, OS_PATH_SEPARATOR)) != NULL)
 			{
 				p++;
 				srv_data_file_names[i] = p;
@@ -1622,31 +1611,8 @@ mem_free_and_error:
 	innobase_start_or_create_for_mysql(). As we don't call it in xtrabackup,
 	we have to duplicate checks from that function here. */
 
-#ifdef __WIN__
-	switch (os_get_os_version()) {
-	case OS_WIN95:
-	case OS_WIN31:
-	case OS_WINNT:
-		/* On Win 95, 98, ME, Win32 subsystem for Windows 3.1,
-		and NT use simulated aio. In NT Windows provides async i/o,
-		but when run in conjunction with InnoDB Hot Backup, it seemed
-		to corrupt the data files. */
-
-		srv_use_native_aio = FALSE;
-		break;
-
-	case OS_WIN2000:
-	case OS_WINXP:
-		/* On 2000 and XP, async IO is available. */
-		srv_use_native_aio = TRUE;
-		break;
-
-	default:
-		/* Vista and later have both async IO and condition variables */
-		srv_use_native_aio = TRUE;
-		srv_use_native_conditions = TRUE;
-		break;
-	}
+#ifdef _WIN32
+	srv_use_native_aio = TRUE;
 
 #elif defined(LINUX_NATIVE_AIO)
 
@@ -2104,7 +2070,7 @@ check_if_skip_database_by_path(
 		return(FALSE);
 	}
 
-	const char* db_name = strrchr(path, SRV_PATH_SEPARATOR);
+	const char* db_name = strrchr(path, OS_PATH_SEPARATOR);
 	if (db_name == NULL) {
 		db_name = path;
 	} else {
@@ -3412,8 +3378,8 @@ open_or_create_log_file(
 	memcpy(name, srv_log_group_home_dir, dirnamelen);
 
 	/* Add a path separator if needed. */
-	if (dirnamelen && name[dirnamelen - 1] != SRV_PATH_SEPARATOR) {
-		name[dirnamelen++] = SRV_PATH_SEPARATOR;
+	if (dirnamelen && name[dirnamelen - 1] != OS_PATH_SEPARATOR) {
+		name[dirnamelen++] = OS_PATH_SEPARATOR;
 	}
 
 	sprintf(name + dirnamelen, "%s%lu", "ib_logfile", (ulong) i);
@@ -3583,32 +3549,31 @@ xtrabackup_backup_func(void)
 
 
 	if (srv_file_flush_method_str == NULL) {
-        	/* These are the default options */
-		srv_unix_file_flush_method = SRV_UNIX_FSYNC;
+		/* These are the default options */
+		srv_file_flush_method = SRV_FSYNC;
 	} else if (0 == ut_strcmp(srv_file_flush_method_str, "fsync")) {
-		srv_unix_file_flush_method = SRV_UNIX_FSYNC;
+		srv_file_flush_method = SRV_FSYNC;
 	} else if (0 == ut_strcmp(srv_file_flush_method_str, "O_DSYNC")) {
-	  	srv_unix_file_flush_method = SRV_UNIX_O_DSYNC;
+		srv_file_flush_method = SRV_O_DSYNC;
 
 	} else if (0 == ut_strcmp(srv_file_flush_method_str, "O_DIRECT")) {
-	  	srv_unix_file_flush_method = SRV_UNIX_O_DIRECT;
+		srv_file_flush_method = SRV_O_DIRECT;
 		msg("xtrabackup: using O_DIRECT\n");
 	} else if (0 == ut_strcmp(srv_file_flush_method_str, "littlesync")) {
-	  	srv_unix_file_flush_method = SRV_UNIX_LITTLESYNC;
-
+		srv_file_flush_method = SRV_LITTLESYNC;
 	} else if (0 == ut_strcmp(srv_file_flush_method_str, "nosync")) {
-	  	srv_unix_file_flush_method = SRV_UNIX_NOSYNC;
+		srv_file_flush_method = SRV_NOSYNC;
 	} else if (0 == ut_strcmp(srv_file_flush_method_str, "ALL_O_DIRECT")) {
-		srv_unix_file_flush_method = SRV_UNIX_ALL_O_DIRECT;
+		srv_file_flush_method = SRV_ALL_O_DIRECT_FSYNC;
 		msg("xtrabackup: using ALL_O_DIRECT\n");
 	} else if (0 == ut_strcmp(srv_file_flush_method_str,
 				  "O_DIRECT_NO_FSYNC")) {
-		srv_unix_file_flush_method = SRV_UNIX_O_DIRECT_NO_FSYNC;
+		srv_file_flush_method = SRV_O_DIRECT_NO_FSYNC;
 		msg("xtrabackup: using O_DIRECT_NO_FSYNC\n");
 	} else {
-	  	msg("xtrabackup: Unrecognized value %s for "
+		msg("xtrabackup: Unrecognized value %s for "
 		    "innodb_flush_method\n", srv_file_flush_method_str);
-	  	exit(EXIT_FAILURE);
+		exit(EXIT_FAILURE);
 	}
 
 	/* We can only use synchronous unbuffered IO on Windows for now */

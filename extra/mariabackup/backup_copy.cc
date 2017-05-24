@@ -89,7 +89,7 @@ struct datadir_iter_t {
 	ulint		filepath_len;
 	char		*filepath_rel;
 	ulint		filepath_rel_len;
-	os_ib_mutex_t	mutex;
+	pthread_mutex_t	mutex;
 	os_file_dir_t	dir;
 	os_file_dir_t	dbdir;
 	os_file_stat_t	dbinfo;
@@ -107,7 +107,7 @@ struct datadir_thread_ctxt_t {
 	datadir_iter_t		*it;
 	uint			n_thread;
 	uint			*count;
-	os_ib_mutex_t		count_mutex;
+	pthread_mutex_t		count_mutex;
 	os_thread_id_t		id;
 	bool			ret;
 };
@@ -181,7 +181,7 @@ datadir_iter_new(const char *path, bool skip_first_level = true)
 	it = static_cast<datadir_iter_t *>(malloc(sizeof(datadir_iter_t)));
 	memset(it, 0, sizeof(datadir_iter_t));
 
-	it->mutex = os_mutex_create();
+	pthread_mutex_init(&it->mutex, NULL);
 	it->datadir_path = strdup(path);
 
 	it->dir = os_file_opendir(it->datadir_path, TRUE);
@@ -374,7 +374,7 @@ datadir_iter_next(datadir_iter_t *it, datadir_node_t *node)
 {
 	bool	ret = true;
 
-	os_mutex_enter(it->mutex);
+	pthread_mutex_lock(&it->mutex);
 
 	if (datadir_iter_next_file(it)) {
 
@@ -409,7 +409,7 @@ datadir_iter_next(datadir_iter_t *it, datadir_node_t *node)
 	ret = false;
 
 done:
-	os_mutex_exit(it->mutex);
+	pthread_mutex_unlock(&it->mutex);
 
 	return(ret);
 }
@@ -423,7 +423,7 @@ static
 void
 datadir_iter_free(datadir_iter_t *it)
 {
-	os_mutex_free(it->mutex);
+	pthread_mutex_destroy(&it->mutex);
 
 	if (it->dbdir) {
 
@@ -912,13 +912,13 @@ run_data_threads(datadir_iter_t *it, os_thread_func_t func, uint n)
 {
 	datadir_thread_ctxt_t	*data_threads;
 	uint			i, count;
-	os_ib_mutex_t		count_mutex;
+	pthread_mutex_t		count_mutex;
 	bool			ret;
 
 	data_threads = (datadir_thread_ctxt_t*)
 		malloc(sizeof(datadir_thread_ctxt_t) * n);
 
-	count_mutex = os_mutex_create();
+	pthread_mutex_init(&count_mutex, NULL);
 	count = n;
 
 	for (i = 0; i < n; i++) {
@@ -932,15 +932,15 @@ run_data_threads(datadir_iter_t *it, os_thread_func_t func, uint n)
 	/* Wait for threads to exit */
 	while (1) {
 		os_thread_sleep(100000);
-		os_mutex_enter(count_mutex);
+		pthread_mutex_lock(&count_mutex);
 		if (count == 0) {
-			os_mutex_exit(count_mutex);
+			pthread_mutex_unlock(&count_mutex);
 			break;
 		}
-		os_mutex_exit(count_mutex);
+		pthread_mutex_unlock(&count_mutex);
 	}
 
-	os_mutex_free(count_mutex);
+	pthread_mutex_destroy(&count_mutex);
 
 	ret = true;
 	for (i = 0; i < n; i++) {
