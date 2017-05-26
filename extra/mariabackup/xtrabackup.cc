@@ -3568,7 +3568,7 @@ xtrabackup_backup_func(void)
 	srv_n_purge_threads = 1;
 	srv_read_only_mode = TRUE;
 
-	srv_backup_mode = TRUE;
+	srv_operation = SRV_OPERATION_BACKUP;
 
 	if (xb_close_files)
 		msg("xtrabackup: warning: close-files specified. Use it "
@@ -4061,10 +4061,9 @@ xtrabackup_init_temp_log()
 #if 0 // TODO: adjust for MariaDB 10.2.2 redo log format
 retry:
 #endif
-	src_file = os_file_create_simple_no_error_handling(0, src_path,
-							   OS_FILE_OPEN,
-							   OS_FILE_READ_WRITE,
-							   &success,0);
+	src_file = os_file_create_simple_no_error_handling(
+		0, src_path,
+		OS_FILE_OPEN, OS_FILE_READ_WRITE, false, &success);
 	if (!success) {
 		/* The following call prints an error message */
 		os_file_get_last_error(TRUE);
@@ -4073,10 +4072,9 @@ retry:
 		    src_path);
 
 		/* check if ib_logfile0 may be xtrabackup_logfile */
-		src_file = os_file_create_simple_no_error_handling(0, dst_path,
-								   OS_FILE_OPEN,
-								   OS_FILE_READ_WRITE,
-								   &success,0);
+		src_file = os_file_create_simple_no_error_handling(
+			0, dst_path,
+			OS_FILE_OPEN, OS_FILE_READ_WRITE, false, &success);
 		if (!success) {
 			os_file_get_last_error(TRUE);
 			msg("  xtrabackup: Fatal error: cannot find %s.\n",
@@ -4346,9 +4344,9 @@ file. Code adopted from fil_create_new_single_table_tablespace with
 the main difference that only disk file is created without updating
 the InnoDB in-memory dictionary data structures.
 
-@return TRUE on success, FALSE on error.  */
+@return true on success, false on error.  */
 static
-ibool
+bool
 xb_space_create_file(
 /*==================*/
 	const char*	path,		/*!<in: path to tablespace */
@@ -4360,9 +4358,8 @@ xb_space_create_file(
 	byte*		buf;
 	byte*		page;
 
-	*file = os_file_create_simple_no_error_handling(0, path, OS_FILE_CREATE,
-							OS_FILE_READ_WRITE,
-							&ret,0);
+	*file = os_file_create_simple_no_error_handling(
+		0, path, OS_FILE_CREATE, OS_FILE_READ_WRITE, false, &ret);
 	if (!ret) {
 		msg("xtrabackup: cannot create file %s\n", path);
 		return ret;
@@ -4588,10 +4585,9 @@ xb_delta_open_matching_space(
 found:
 	/* open the file and return it's handle */
 
-	file = os_file_create_simple_no_error_handling(0, real_name,
-						       OS_FILE_OPEN,
-						       OS_FILE_READ_WRITE,
-						       success, 0);
+	file = os_file_create_simple_no_error_handling(
+		0, real_name,
+		OS_FILE_OPEN, OS_FILE_READ_WRITE, false, success);
 
 	if (!*success) {
 		msg("xtrabackup: Cannot open file %s\n", real_name);
@@ -4675,10 +4671,9 @@ xtrabackup_apply_delta(
 		goto error;
 	}
 
-	src_file = os_file_create_simple_no_error_handling(0, src_path,
-							   OS_FILE_OPEN,
-							   OS_FILE_READ_WRITE,
-							   &success,0);
+	src_file = os_file_create_simple_no_error_handling(
+		0, src_path,
+		OS_FILE_OPEN, OS_FILE_READ_WRITE, false, &success);
 	if (!success) {
 		os_file_get_last_error(TRUE);
 		msg("xtrabackup: error: cannot open %s\n", src_path);
@@ -6037,8 +6032,7 @@ handle_options(int argc, char **argv, char ***argv_client, char ***argv_server)
 {
 	/* Setup some variables for Innodb.*/
 
-	srv_xtrabackup = true;
-
+	srv_operation = SRV_OPERATION_RESTORE;
 
 	files_charset_info = &my_charset_utf8_general_ci;
 	dict_check_if_skip_table = check_if_skip_table;
