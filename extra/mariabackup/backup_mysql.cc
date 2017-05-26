@@ -1528,7 +1528,6 @@ bool write_backup_config_file()
 		"# The MySQL server\n"
 		"[mysqld]\n"
 		"innodb_checksum_algorithm=%s\n"
-		"innodb_log_checksum_algorithm=%s\n"
 		"innodb_data_file_path=%s\n"
 		"innodb_log_files_in_group=%lu\n"
 		"innodb_log_file_size=%lld\n"
@@ -1540,7 +1539,6 @@ bool write_backup_config_file()
 		"%s%s\n"
 		"%s\n",
 		innodb_checksum_algorithm_names[srv_checksum_algorithm],
-		innodb_checksum_algorithm_names[srv_log_checksum_algorithm],
 		innobase_data_file_path,
 		srv_n_log_files,
 		innobase_log_file_size,

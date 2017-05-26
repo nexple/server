@@ -22,7 +22,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 #define xb0xb_h
 
 
-extern void os_io_init_simple(void);
 extern pfs_os_file_t	files[1000];
 extern const char *innodb_checksum_algorithm_names[];
 extern TYPELIB innodb_checksum_algorithm_typelib;
@@ -46,12 +45,6 @@ dberr_t*	err,	/*!< out: this is set to DB_ERROR if an error
                                       info is returned */;
 fil_space_t*
 fil_space_get_by_name(const char *);
-ibool
-recv_check_cp_is_consistent(const byte*	buf);
-void
-innodb_log_checksum_func_update(
-/*============================*/
-ulint	algorithm)	/*!< in: algorithm */;
 dberr_t
 srv_undo_tablespaces_init(
 /*======================*/
