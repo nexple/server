@@ -849,6 +849,13 @@ public:
 		return(m_space);
 	}
 
+	/** Member accessor
+	@return the wrapped object */
+	const fil_space_t* operator->() const
+	{
+		return(m_space);
+	}
+
 	/** Explicit type conversion
 	@return the wrapped object */
 	const fil_space_t* operator()() const
