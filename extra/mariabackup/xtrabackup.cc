@@ -119,7 +119,7 @@ my_bool xtrabackup_decrypt_decompress = FALSE;
 my_bool xtrabackup_print_param = FALSE;
 
 my_bool xtrabackup_export = FALSE;
-my_bool xtrabackup_apply_log_only = FALSE;
+my_bool xtrabackup_apply_log_only;
 
 longlong xtrabackup_use_memory = 100*1024*1024L;
 my_bool xtrabackup_create_ib_logfile = FALSE;
@@ -576,7 +576,7 @@ struct my_option xb_client_options[] =
    (G_PTR*) &xtrabackup_export, (G_PTR*) &xtrabackup_export,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"apply-log-only", OPT_XTRA_APPLY_LOG_ONLY,
-   "stop recovery process not to progress LSN after applying log when prepare.",
+   "do not process undo log after applying redo log in prepare.",
    (G_PTR*) &xtrabackup_apply_log_only, (G_PTR*) &xtrabackup_apply_log_only,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"print-param", OPT_XTRA_PRINT_PARAM, "print parameter of mysqld needed for copyback.",
@@ -5479,8 +5479,13 @@ skip_check:
 
 	xb_filters_init();
 
-	if (xtrabackup_init_temp_log())
-		goto error_cleanup;
+	if (xtrabackup_init_temp_log()) {
+error_cleanup:
+		xtrabackup_close_temp_log();
+		xb_filters_free();
+error:
+		exit(EXIT_FAILURE);
+	}
 
 	if(innodb_init_param()) {
 		goto error_cleanup;
@@ -5529,7 +5534,12 @@ skip_check:
 		goto error_cleanup;
 	}
 
-	srv_apply_log_only = (bool) xtrabackup_apply_log_only;
+	const ulong save_force_recovery = srv_force_recovery;
+
+	if (xtrabackup_apply_log_only
+	    && srv_force_recovery < SRV_FORCE_NO_TRX_UNDO) {
+		srv_force_recovery = SRV_FORCE_NO_TRX_UNDO;
+	}
 
 	/* increase IO threads */
 	if(srv_n_file_io_threads < 10) {
@@ -5826,7 +5836,7 @@ next_node:
 	{
 		char	filename[FN_REFLEN];
 
-		strcpy(metadata_type, srv_apply_log_only ?
+		strcpy(metadata_type, xtrabackup_apply_log_only ?
 					"log-applied" : "full-prepared");
 
 		if(xtrabackup_incremental
@@ -5863,6 +5873,8 @@ next_node:
 		fil_close();
 	}
 
+	srv_force_recovery = save_force_recovery;
+
 	/* start InnoDB once again to create log files */
 
 	if (!xtrabackup_apply_log_only) {
@@ -5876,8 +5888,6 @@ next_node:
 		if(innodb_init_param()) {
 			goto error;
 		}
-
-		srv_apply_log_only = false;
 
 		/* increase IO threads */
 		if(srv_n_file_io_threads < 10) {
@@ -5895,15 +5905,6 @@ next_node:
 	}
 
 	xb_filters_free();
-
-	return;
-
-error_cleanup:
-	xtrabackup_close_temp_log();
-	xb_filters_free();
-
-error:
-	exit(EXIT_FAILURE);
 }
 
 /**************************************************************************
