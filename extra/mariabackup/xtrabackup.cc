@@ -1393,7 +1393,6 @@ innodb_init_param(void)
 {
 	/* innobase_init */
 	static char	current_dir[3];		/* Set if using current lib */
-	my_bool		ret;
 	char		*default_path;
 	srv_is_being_started = TRUE;
 	/* === some variables from mysqld === */
@@ -1494,21 +1493,20 @@ innodb_init_param(void)
 	msg("xtrabackup:   innodb_data_file_path = %s\n",
 	    innobase_data_file_path);
 
-	/* Since InnoDB edits the argument in the next call, we make another
-	copy of it: */
+	/* This is the first time univ_page_size is used.
+	It was initialized to 16k pages before srv_page_size was set */
+	univ_page_size.copy_from(
+		page_size_t(srv_page_size, srv_page_size, false));
 
-	internal_innobase_data_file_path = strdup(innobase_data_file_path);
+	srv_sys_space.set_space_id(TRX_SYS_SPACE);
+	srv_sys_space.set_name("innodb_system");
+	srv_sys_space.set_path(srv_data_home);
+	srv_sys_space.set_flags(FSP_FLAGS_PAGE_SSIZE());
 
-	ret = (my_bool) srv_parse_data_file_paths_and_sizes(
-			internal_innobase_data_file_path);
-	if (ret == FALSE) {
-		msg("xtrabackup: syntax error in innodb_data_file_path\n");
-mem_free_and_error:
-		free(internal_innobase_data_file_path);
-		internal_innobase_data_file_path = NULL;
+	if (!srv_sys_space.parse_params(innobase_data_file_path, true)) {
 		goto error;
 	}
-
+#if 0 // TODO: fix this
 	if (xtrabackup_prepare) {
 		/* "--prepare" needs filenames only */
 		ulint i;
@@ -1524,6 +1522,7 @@ mem_free_and_error:
 			}
 		}
 	}
+#endif
 
 	/* -------------- Log files ---------------------------*/
 
@@ -1543,8 +1542,7 @@ mem_free_and_error:
 	if (strchr(srv_log_group_home_dir, ';')) {
 
 		msg("syntax error in innodb_log_group_home_dir, ");
-
-		goto mem_free_and_error;
+		goto error;
 	}
 
 	srv_adaptive_flushing = FALSE;
@@ -3425,20 +3423,9 @@ void
 xb_normalize_init_values(void)
 /*==========================*/
 {
-	ulint	i;
-
-	for (i = 0; i < srv_n_data_files; i++) {
-		srv_data_file_sizes[i] = srv_data_file_sizes[i]
-					* ((1024 * 1024) / UNIV_PAGE_SIZE);
-	}
-
-	srv_last_file_size_max = srv_last_file_size_max
-					* ((1024 * 1024) / UNIV_PAGE_SIZE);
-
-	srv_log_file_size = srv_log_file_size / UNIV_PAGE_SIZE;
-
-	srv_log_buffer_size = srv_log_buffer_size / UNIV_PAGE_SIZE;
-
+	srv_sys_space.normalize();
+	srv_log_file_size /= UNIV_PAGE_SIZE;
+	srv_log_buffer_size /= UNIV_PAGE_SIZE;
 	srv_lock_table_size = 5 * (srv_buf_pool_size / UNIV_PAGE_SIZE);
 }
 
@@ -5318,7 +5305,6 @@ static
 void
 innodb_free_param()
 {
-	srv_free_paths_and_sizes();
 	free(internal_innobase_data_file_path);
 	internal_innobase_data_file_path = NULL;
 	free_tmpdir(&mysql_tmpdir_list);

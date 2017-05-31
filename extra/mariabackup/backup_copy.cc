@@ -1673,8 +1673,9 @@ copy_back()
 	}
 	innobase_data_file_path_copy = strdup(innobase_data_file_path);
 
-	if (!(ret = srv_parse_data_file_paths_and_sizes(
-					innobase_data_file_path_copy))) {
+	srv_sys_space.set_path(".");
+
+	if (!srv_sys_space.parse_params(innobase_data_file_path, true)) {
 		msg("syntax error in innodb_data_file_path\n");
 		return(false);
 	}
@@ -1738,10 +1739,13 @@ copy_back()
 
 	ds_data = ds_create(dst_dir, DS_TYPE_LOCAL);
 
-	for (i = 0; i < srv_n_data_files; i++) {
-		const char *filename = base_name(srv_data_file_names[i]);
+	for (Tablespace::const_iterator iter(srv_sys_space.begin()),
+	     end(srv_sys_space.end());
+	     iter != end;
+	     ++iter) {
+		const char *filename = base_name(iter->name());
 
-		if (!(ret = copy_or_move_file(filename, srv_data_file_names[i],
+		if (!(ret = copy_or_move_file(filename, iter->name(),
 					      dst_dir, 1))) {
 			goto cleanup;
 		}
@@ -1811,14 +1815,11 @@ copy_back()
 
 		/* skip innodb data files */
 		is_ibdata_file = false;
-		for (i = 0; i < srv_n_data_files; i++) {
-			const char *ibfile;
-
-			ibfile = base_name(srv_data_file_names[i]);
-
-			if (strcmp(ibfile, filename) == 0) {
+		for (Tablespace::const_iterator iter(srv_sys_space.begin()),
+		       end(srv_sys_space.end()); iter != end; ++iter) {
+			if (strcmp(iter->name(), filename) == 0) {
 				is_ibdata_file = true;
-				continue;
+				break;
 			}
 		}
 		if (is_ibdata_file) {
