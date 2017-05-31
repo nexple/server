@@ -244,7 +244,7 @@ xb_fil_cur_open(
 	/* Allocate read buffer */
 	cursor->buf_size = XB_FIL_CUR_PAGES * page_size;
 	cursor->orig_buf = static_cast<byte *>
-		(ut_malloc(cursor->buf_size + UNIV_PAGE_SIZE));
+		(malloc(cursor->buf_size + UNIV_PAGE_SIZE));
 	cursor->buf = static_cast<byte *>
 		(ut_align(cursor->orig_buf, UNIV_PAGE_SIZE));
 
@@ -401,9 +401,8 @@ xb_fil_cur_close(
 {
 	cursor->read_filter->deinit(&cursor->read_filter_ctxt);
 
-	if (cursor->orig_buf != NULL) {
-		ut_free(cursor->orig_buf);
-	}
+	free(cursor->orig_buf);
+
 	if (cursor->node != NULL) {
 		xb_fil_node_close_file(cursor->node);
 		cursor->file = OS_FILE_CLOSED;
