@@ -5378,29 +5378,22 @@ innodb_free_param()
 }
 
 
-/**************************************************************************
-Store the current binary log coordinates in a specified file.
-@return 'false' on error. */
+/** Store the current binary log coordinates in a specified file.
+@param[in]	filename	file name
+@param[in]	name		binary log file name
+@param[in]	pos		binary log file position
+@return whether the operation succeeded */
 static bool
-store_binlog_info(
-/*==============*/
-	const char *filename)	/*!< in: output file name */
+store_binlog_info(const char* filename, const char* name, ulonglong pos)
 {
-	FILE *fp;
-
-	if (trx_sys_mysql_bin_log_name[0] == '\0') {
-		return(true);
-	}
-
-	fp = fopen(filename, "w");
+	FILE *fp = fopen(filename, "w");
 
 	if (!fp) {
 		msg("xtrabackup: failed to open '%s'\n", filename);
 		return(false);
 	}
 
-	fprintf(fp, "%s\t" UINT64PF "\n",
-		trx_sys_mysql_bin_log_name, trx_sys_mysql_bin_log_pos);
+	fprintf(fp, "%s\t%llu\n", name, pos);
 	fclose(fp);
 
 	return(true);
@@ -5752,19 +5745,45 @@ next_node:
 		free(buf);
 	}
 
-	/* print the binary log position  */
-	trx_sys_print_mysql_binlog_offset();
-	msg("\n");
+	{
+		mtr_t			mtr;
+		mtr.start();
+		const trx_sysf_t*	sys_header = trx_sysf_get(&mtr);
+		bool	fail;
 
-	/* output to xtrabackup_binlog_pos_innodb and (if
-	backup_safe_binlog_info was available on the server) to
-	xtrabackup_binlog_info. In the latter case xtrabackup_binlog_pos_innodb
-	becomes redundant and is created only for compatibility. */
-	if (!store_binlog_info("xtrabackup_binlog_pos_innodb") ||
-	    (recover_binlog_info &&
-	     !store_binlog_info(XTRABACKUP_BINLOG_INFO))) {
+		if (mach_read_from_4(TRX_SYS_MYSQL_LOG_INFO
+				     + TRX_SYS_MYSQL_LOG_MAGIC_N_FLD
+				     + sys_header)
+		    == TRX_SYS_MYSQL_LOG_MAGIC_N) {
+			ulonglong pos = mach_read_from_8(
+				TRX_SYS_MYSQL_LOG_INFO
+				+ TRX_SYS_MYSQL_LOG_OFFSET
+				+ sys_header);
+			const char* name = reinterpret_cast<const char*>(
+				TRX_SYS_MYSQL_LOG_INFO + TRX_SYS_MYSQL_LOG_NAME
+				+ sys_header);
+			msg("Last binlog file %s, position %llu\n", name, pos);
 
-		exit(EXIT_FAILURE);
+			/* output to xtrabackup_binlog_pos_innodb and
+			(if backup_safe_binlog_info was available on
+			the server) to xtrabackup_binlog_info. In the
+			latter case xtrabackup_binlog_pos_innodb
+			becomes redundant and is created only for
+			compatibility. */
+			fail = !store_binlog_info(
+				"xtrabackup_binlog_pos_innodb", name, pos)
+				|| (recover_binlog_info && !store_binlog_info(
+					    XTRABACKUP_BINLOG_INFO,
+					    name, pos));
+		} else {
+			fail = false;
+		}
+
+		mtr.commit();
+
+		if (fail) {
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	/* Check whether the log is applied enough or not. */
