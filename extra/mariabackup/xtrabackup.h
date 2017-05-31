@@ -35,15 +35,6 @@ struct xb_delta_info_t
 	ulint		space_id;
 };
 
-/* ======== Datafiles iterator ======== */
-typedef struct {
-	fil_system_t	*system;
-	fil_space_t	*space;
-	fil_node_t	*node;
-	ibool		started;
-	pthread_mutex_t	mutex;
-} datafiles_iter_t;
-
 /* value of the --incremental option */
 extern lsn_t incremental_lsn;
 
@@ -162,10 +153,6 @@ extern ulong opt_binlog_info;
 void xtrabackup_io_throttling(void);
 my_bool xb_write_delta_metadata(const char *filename,
 				const xb_delta_info_t *info);
-
-datafiles_iter_t *datafiles_iter_new(fil_system_t *f_system);
-fil_node_t *datafiles_iter_next(datafiles_iter_t *it);
-void datafiles_iter_free(datafiles_iter_t *it);
 
 /** @return the tablespace flags from a given data file
 @retval	ULINT_UNDEFINED	if the file is not readable */
