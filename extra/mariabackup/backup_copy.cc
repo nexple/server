@@ -466,7 +466,7 @@ static
 void
 datafile_close(datafile_cur_t *cursor)
 {
-	if (cursor->file != 0) {
+	if (cursor->file != OS_FILE_CLOSED) {
 		os_file_close(cursor->file);
 	}
 	ut_free(cursor->buf);

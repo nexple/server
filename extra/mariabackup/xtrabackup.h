@@ -26,12 +26,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 #include "xbstream.h"
 #include "changed_page_bitmap.h"
 
-#ifdef __WIN__
-#define XB_FILE_UNDEFINED INVALID_HANDLE_VALUE
-#else
-#define XB_FILE_UNDEFINED (-1)
-#endif
-
 typedef struct {
 	ulint	page_size;
 	ulint	zip_size;

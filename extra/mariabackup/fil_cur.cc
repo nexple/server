@@ -406,6 +406,6 @@ xb_fil_cur_close(
 	}
 	if (cursor->node != NULL) {
 		xb_fil_node_close_file(cursor->node);
-		cursor->file = XB_FILE_UNDEFINED;
+		cursor->file = OS_FILE_CLOSED;
 	}
 }
