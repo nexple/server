@@ -41,7 +41,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 //#define XTRABACKUP_TARGET_IS_PLUGIN
 
+#include <my_config.h>
+#include <unireg.h>
 #include <mysql_version.h>
+
 #include <my_base.h>
 #include <my_getopt.h>
 #include <mysql_com.h>
@@ -3655,11 +3658,9 @@ open_or_create_log_file(
 	}
 
 	sprintf(name + dirnamelen, "%s%lu", "ib_logfile", (ulong) i);
-
-	files[i] = os_file_create(0, name,
-				  OS_FILE_OPEN, OS_FILE_NORMAL,
-				  OS_LOG_FILE, &ret,0);
-	if (ret == FALSE) {
+  bool success;
+	files[i] = os_file_create(0, name, OS_FILE_OPEN, OS_FILE_NORMAL,OS_LOG_FILE, true, &success);
+	if (!success) {
 		fprintf(stderr, "InnoDB: Error in opening %s\n", name);
 
 		return(DB_ERROR);
@@ -3844,8 +3845,8 @@ xtrabackup_backup_func(void)
 	}
 
 #ifdef _WIN32
-	srv_win_file_flush_method = SRV_WIN_IO_UNBUFFERED;
-	srv_use_native_aio = FALSE;
+  srv_file_flush_method = SRV_ALL_O_DIRECT_FSYNC;
+	srv_use_native_aio = TRUE;
 #endif
 
 	if (srv_buf_pool_size >= 1000 * 1024 * 1024) {
@@ -6209,10 +6210,12 @@ extern void init_signals(void);
 
 #include <sql_locale.h>
 
+
 /* Messages . Avoid loading errmsg.sys file */
 void setup_error_messages()
 {
-  static  const char *all_msgs[ER_ERROR_LAST - ER_ERROR_FIRST +1];
+  static const char *my_msgs[ERRORS_PER_RANGE];
+  static const char **all_msgs[] = { my_msgs, my_msgs, my_msgs, my_msgs };
   my_default_lc_messages = &my_locale_en_US;
   my_default_lc_messages->errmsgs->errmsgs = all_msgs;
 
@@ -6239,10 +6242,10 @@ void setup_error_messages()
   };
 
   for (int i = 0; i < (int)array_elements(all_msgs); i++)
-    all_msgs[i] = "Unknown error";
+    all_msgs[0][i] = "Unknown error";
 
   for (int i = 0; i < (int)array_elements(xb_msgs); i++)
-    all_msgs[xb_msgs[i].id - ER_ERROR_FIRST] = xb_msgs[i].fmt;
+    all_msgs[0][xb_msgs[i].id - ER_ERROR_FIRST] = xb_msgs[i].fmt;
 }
 
 void

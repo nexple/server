@@ -76,6 +76,7 @@ MYSQL_ADD_EXECUTABLE(mariabackup
   encryption_plugin.cc
   ${PROJECT_SOURCE_DIR}/sql/net_serv.cc
   ${NT_SERVICE_SOURCE}
+  ${PROJECT_SOURCE_DIR}/libmysqld/libmysql.c
   COMPONENT backup
   )
 
