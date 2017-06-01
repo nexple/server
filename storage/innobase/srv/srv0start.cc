@@ -182,7 +182,7 @@ SRV_SHUTDOWN_CLEANUP and then to SRV_SHUTDOWN_LAST_PHASE, and so on */
 enum srv_shutdown_t	srv_shutdown_state = SRV_SHUTDOWN_NONE;
 
 /** Files comprising the system tablespace */
-static pfs_os_file_t	files[1000];
+pfs_os_file_t	files[1000];
 
 /** io_handler_thread parameters for thread identification */
 static ulint		n[SRV_MAX_N_IO_THREADS + 6];
@@ -822,7 +822,6 @@ undo::undo_spaces_t	undo::Truncate::s_fix_up_spaces;
 /** Open the configured number of dedicated undo tablespaces.
 @param[in]	create_new_db	whether the database is being initialized
 @return DB_SUCCESS or error code */
-static
 dberr_t
 srv_undo_tablespaces_init(bool create_new_db)
 {
@@ -835,6 +834,7 @@ srv_undo_tablespaces_init(bool create_new_db)
 	srv_undo_tablespaces_open = 0;
 
 	ut_a(srv_undo_tablespaces <= TRX_SYS_N_RSEGS);
+	ut_a(!create_new_db || srv_operation == SRV_OPERATION_NORMAL);
 
 	memset(undo_tablespace_ids, 0x0, sizeof(undo_tablespace_ids));
 
@@ -880,7 +880,7 @@ srv_undo_tablespaces_init(bool create_new_db)
 	we build the undo_tablespace_ids ourselves since they don't
 	already exist. */
 
-	if (!create_new_db) {
+	if (!create_new_db && srv_operation == SRV_OPERATION_NORMAL) {
 		n_undo_tablespaces = trx_rseg_get_n_undo_tablespaces(
 			undo_tablespace_ids);
 

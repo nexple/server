@@ -2842,7 +2842,7 @@ static void xtrabackup_destroy_datasinks(void)
 /************************************************************************
 @return TRUE if table should be opened. */
 static
-ibool
+bool
 xb_check_if_open_tablespace(
 	const char*	db,
 	const char*	table)
@@ -2872,6 +2872,266 @@ xb_fil_io_init(void)
 	fsp_init();
 }
 
+static
+Datafile*
+xb_new_datafile(const char *name, bool is_remote)
+{
+	if (is_remote) {
+		RemoteDatafile *remote_file = new RemoteDatafile();
+		remote_file->set_name(name);
+		return(remote_file);
+	} else {
+		Datafile *file = new Datafile();
+		file->set_name(name);
+		file->make_filepath(".", name, IBD);
+		return(file);
+	}
+}
+
+static
+void
+xb_load_single_table_tablespace(
+	const char *dirname,
+	const char *filname,
+	bool is_remote)
+{
+	/* Ignore .isl files on XtraBackup recovery. All tablespaces must be
+	local. */
+	if (is_remote && srv_operation == SRV_OPERATION_RESTORE) {
+		return;
+	}
+
+	/* The name ends in .ibd or .isl;
+	try opening the file */
+	char*	name;
+	size_t	dirlen		= dirname == NULL ? 0 : strlen(dirname);
+	size_t	namelen		= strlen(filname);
+	ulint	pathlen		= dirname == NULL ? namelen + 1: dirlen + namelen + 2;
+	lsn_t	flush_lsn;
+	dberr_t	err;
+	fil_space_t	*space;
+
+	name = static_cast<char*>(ut_malloc_nokey(pathlen));
+
+	if (dirname != NULL) {
+		ut_snprintf(name, pathlen, "%s/%s", dirname, filname);
+		name[pathlen - 5] = 0;
+	} else {
+		ut_snprintf(name, pathlen, "%s", filname);
+		name[pathlen - 5] = 0;
+	}
+
+	Datafile *file = xb_new_datafile(name, is_remote);
+
+	if (file->open_read_only(true) != DB_SUCCESS) {
+		ut_free(name);
+		exit(EXIT_FAILURE);
+	}
+
+	err = file->validate_first_page(&flush_lsn);
+
+	if (err == DB_SUCCESS && file->space_id() != SRV_TMP_SPACE_ID) {
+		os_offset_t	node_size = os_file_get_size(file->handle());
+		os_offset_t	n_pages;
+
+		ut_a(node_size != (os_offset_t) -1);
+
+		n_pages = node_size / page_size_t(file->flags()).physical();
+
+		space = fil_space_create(
+			name, file->space_id(), file->flags(),
+			FIL_TYPE_TABLESPACE, NULL/* TODO: crypt_data */);
+
+		ut_a(space != NULL);
+
+		if (!fil_node_create(file->filepath(), n_pages, space,
+				     false, false)) {
+			ut_error;
+		}
+
+		/* by opening the tablespace we forcing node and space objects
+		in the cache to be populated with fields from space header */
+		fil_space_open(space->name);
+
+		if (srv_operation == SRV_OPERATION_RESTORE || xb_close_files) {
+			fil_space_close(space->name);
+		}
+	}
+
+	ut_free(name);
+
+	delete file;
+
+	if (err != DB_SUCCESS && err != DB_CORRUPTION && xtrabackup_backup) {
+		/* allow corrupted first page for xtrabackup, it could be just
+		zero-filled page, which we restore from redo log later */
+		exit(EXIT_FAILURE);
+	}
+}
+
+/********************************************************************//**
+At the server startup, if we need crash recovery, scans the database
+directories under the MySQL datadir, looking for .ibd files. Those files are
+single-table tablespaces. We need to know the space id in each of them so that
+we know into which file we should look to check the contents of a page stored
+in the doublewrite buffer, also to know where to apply log records where the
+space id is != 0.
+@return	DB_SUCCESS or error number */
+UNIV_INTERN
+dberr_t
+xb_load_single_table_tablespaces(bool (*pred)(const char*, const char*))
+/*===================================*/
+{
+	int		ret;
+	char*		dbpath		= NULL;
+	ulint		dbpath_len	= 100;
+	os_file_dir_t	dir;
+	os_file_dir_t	dbdir;
+	os_file_stat_t	dbinfo;
+	os_file_stat_t	fileinfo;
+	dberr_t		err		= DB_SUCCESS;
+
+	/* The datadir of MySQL is always the default directory of mysqld */
+
+	dir = os_file_opendir(fil_path_to_mysql_datadir, true);
+
+	if (dir == NULL) {
+
+		return(DB_ERROR);
+	}
+
+	dbpath = static_cast<char*>(ut_malloc_nokey(dbpath_len));
+
+	/* Scan all directories under the datadir. They are the database
+	directories of MySQL. */
+
+	ret = fil_file_readdir_next_file(&err, fil_path_to_mysql_datadir, dir,
+					 &dbinfo);
+	while (ret == 0) {
+		ulint len;
+
+		/* General tablespaces are always at the first level of the
+		data home dir */
+		if (dbinfo.type == OS_FILE_TYPE_FILE &&
+		    strlen(dbinfo.name) > 4 &&
+		    strcmp(dbinfo.name + strlen(dbinfo.name) - 4, ".isl")
+				== 0 &&
+		    !(pred && !pred(".", dbinfo.name))) {
+			xb_load_single_table_tablespace(NULL, dbinfo.name,
+							true);
+		}
+
+		if (dbinfo.type == OS_FILE_TYPE_FILE &&
+		    strlen(dbinfo.name) > 4 &&
+		    strcmp(dbinfo.name + strlen(dbinfo.name) - 4, ".ibd")
+				== 0 &&
+		    !(pred && !pred(".", dbinfo.name))) {
+			xb_load_single_table_tablespace(NULL, dbinfo.name,
+							false);
+		}
+
+		if (dbinfo.type == OS_FILE_TYPE_FILE
+		    || dbinfo.type == OS_FILE_TYPE_UNKNOWN) {
+
+			goto next_datadir_item;
+		}
+
+		/* We found a symlink or a directory; try opening it to see
+		if a symlink is a directory */
+
+		len = strlen(fil_path_to_mysql_datadir)
+			+ strlen (dbinfo.name) + 2;
+		if (len > dbpath_len) {
+			dbpath_len = len;
+
+			if (dbpath) {
+				ut_free(dbpath);
+			}
+
+			dbpath = static_cast<char*>(ut_malloc_nokey(dbpath_len));
+		}
+		ut_snprintf(dbpath, dbpath_len,
+			    "%s/%s", fil_path_to_mysql_datadir, dbinfo.name);
+		os_normalize_path(dbpath);
+
+		if (check_if_skip_database_by_path(dbpath)) {
+			fprintf(stderr, "Skipping db: %s\n", dbpath);
+			goto next_datadir_item;
+		}
+
+		/* We want wrong directory permissions to be a fatal error for
+		XtraBackup. */
+		dbdir = os_file_opendir(dbpath, true);
+
+		if (dbdir != NULL) {
+
+			/* We found a database directory; loop through it,
+			looking for possible .ibd files in it */
+
+			ret = fil_file_readdir_next_file(&err, dbpath, dbdir,
+							 &fileinfo);
+			while (ret == 0) {
+				bool is_remote;
+
+				if (fileinfo.type == OS_FILE_TYPE_DIR) {
+					goto next_file_item;
+				}
+
+				is_remote = strcmp(fileinfo.name
+					  + strlen(fileinfo.name) - 4,
+					  ".isl") == 0;
+
+				/* We found a symlink or a file */
+				if (strlen(fileinfo.name) > 4
+				    && (0 == strcmp(fileinfo.name
+						   + strlen(fileinfo.name) - 4,
+						   ".ibd"))
+				    && (!pred
+					|| pred(dbinfo.name, fileinfo.name))) {
+					xb_load_single_table_tablespace(
+						dbinfo.name, fileinfo.name,
+						is_remote);
+				}
+next_file_item:
+				ret = fil_file_readdir_next_file(&err,
+								 dbpath, dbdir,
+								 &fileinfo);
+			}
+
+			if (0 != os_file_closedir(dbdir)) {
+				fputs("InnoDB: Warning: could not"
+				      " close database directory ", stderr);
+				fputs(dbpath, stderr);
+				putc('\n', stderr);
+
+				err = DB_ERROR;
+			}
+
+		} else {
+
+			err = DB_ERROR;
+			break;
+
+		}
+
+next_datadir_item:
+		ret = fil_file_readdir_next_file(&err,
+						 fil_path_to_mysql_datadir,
+						 dir, &dbinfo);
+	}
+
+	ut_free(dbpath);
+
+	if (0 != os_file_closedir(dir)) {
+		fprintf(stderr,
+			"InnoDB: Error: could not close MySQL datadir\n");
+
+		return(DB_ERROR);
+	}
+
+	return(err);
+}
+
 /****************************************************************************
 Populates the tablespace memory cache by scanning for and opening data files.
 @returns DB_SUCCESS or error code.*/
@@ -2883,7 +3143,10 @@ xb_load_tablespaces()
 	bool	create_new_db;
 	dberr_t	err;
 	ulint   sum_of_new_sizes;
-	lsn_t min_arch_logno, max_arch_logno;
+        lsn_t	flush_lsn;
+
+	ut_ad(srv_operation == SRV_OPERATION_BACKUP
+	      || srv_operation == SRV_OPERATION_RESTORE);
 
 	for (i = 0; i < srv_n_file_io_threads; i++) {
 		thread_nr[i] = i;
@@ -2894,10 +3157,18 @@ xb_load_tablespaces()
 
 	os_thread_sleep(200000); /*0.2 sec*/
 
-	err = open_or_create_data_files(&create_new_db,
-					&min_arch_logno, &max_arch_logno,
-					&flushed_lsn,
-					&sum_of_new_sizes);
+	err = srv_sys_space.check_file_spec(&create_new_db, 0);
+
+	/* create_new_db must not be true. */
+	if (err != DB_SUCCESS || create_new_db) {
+		msg("xtrabackup: could not find data files at the "
+		    "specified datadir\n");
+		return(DB_ERROR);
+	}
+
+	err = srv_sys_space.open_or_create(false, false, &sum_of_new_sizes,
+					   &flush_lsn);
+
 	if (err != DB_SUCCESS) {
 		msg("xtrabackup: Could not open or create data files.\n"
 		    "xtrabackup: If you tried to add new data files, and it "
@@ -2915,30 +3186,21 @@ xb_load_tablespaces()
 		return(err);
 	}
 
-	/* create_new_db must not be TRUE.. */
-	if (create_new_db) {
-		msg("xtrabackup: could not find data files at the "
-		    "specified datadir\n");
-		return(DB_ERROR);
-	}
-
 	/* Add separate undo tablespaces to fil_system */
 
-	err = srv_undo_tablespaces_init(FALSE,
-					TRUE,
-					srv_undo_tablespaces,
-					&srv_undo_tablespaces_open);
+	err = srv_undo_tablespaces_init(false);
+
 	if (err != DB_SUCCESS) {
 		return(err);
 	}
 
-	/* It is important to call fil_load_single_table_tablespace() after
+	/* It is important to call xb_load_single_table_tablespaces() after
 	srv_undo_tablespaces_init(), because fil_is_user_tablespace_id() *
 	relies on srv_undo_tablespaces_open to be properly initialized */
 
 	msg("xtrabackup: Generating a list of tablespaces\n");
 
-	err = fil_load_single_table_tablespaces(xb_check_if_open_tablespace);
+	err = xb_load_single_table_tablespaces(xb_check_if_open_tablespace);
 	if (err != DB_SUCCESS) {
 		return(err);
 	}
@@ -3632,7 +3894,7 @@ xtrabackup_backup_func(void)
 	log_init(srv_n_log_files, srv_log_file_size * UNIV_PAGE_SIZE);
 	fil_space_t*	space = fil_space_create(
 		"innodb_redo_log", SRV_LOG_SPACE_FIRST_ID, 0,
-		FIL_TYPE_LOG, NULL, false);
+		FIL_TYPE_LOG, NULL);
 
 	lock_sys_create(srv_lock_table_size);
 
@@ -4520,7 +4782,7 @@ xb_delta_open_matching_space(
 	/* No matching space found. create the new one.  */
 
 	if (!fil_space_create(dest_space_name, space_id, 0,
-			      FIL_TYPE_TABLESPACE, 0, false)) {
+			      FIL_TYPE_TABLESPACE, 0)) {
 		msg("xtrabackup: Cannot create tablespace %s\n",
 			dest_space_name);
 		goto exit;
@@ -5983,8 +6245,6 @@ void setup_error_messages()
     all_msgs[xb_msgs[i].id - ER_ERROR_FIRST] = xb_msgs[i].fmt;
 }
 
-extern my_bool(*dict_check_if_skip_table)(const char*	name) ;
-
 void
 handle_options(int argc, char **argv, char ***argv_client, char ***argv_server)
 {
@@ -5993,7 +6253,6 @@ handle_options(int argc, char **argv, char ***argv_client, char ***argv_server)
 	srv_operation = SRV_OPERATION_RESTORE;
 
 	files_charset_info = &my_charset_utf8_general_ci;
-	dict_check_if_skip_table = check_if_skip_table;
 
 	setup_error_messages();
 	sys_var_init();
@@ -6178,8 +6437,6 @@ handle_options(int argc, char **argv, char ***argv_client, char ***argv_server)
 }
 
 /* ================= main =================== */
-extern my_bool(*fil_check_if_skip_database_by_path)(const char* name);
-
 int main(int argc, char **argv)
 {
 	char **client_defaults, **server_defaults;
@@ -6192,9 +6449,6 @@ int main(int argc, char **argv)
     argv[0] = INNOBACKUPEX_EXE;
 		innobackupex_mode = true;
 	}
-
-  /* Setup skip fil_load_single_tablespaces callback.*/
-  fil_check_if_skip_database_by_path = check_if_skip_database_by_path;
 
 	init_signals();
 	MY_INIT(argv[0]);
