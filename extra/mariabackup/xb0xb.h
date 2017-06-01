@@ -23,7 +23,5 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 
 extern const char *innodb_checksum_algorithm_names[];
 extern TYPELIB innodb_checksum_algorithm_typelib;
-fil_space_t*
-fil_space_get_by_name(const char *);
 
 #endif

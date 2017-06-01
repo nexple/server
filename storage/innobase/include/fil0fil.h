@@ -1533,6 +1533,13 @@ fil_space_get_by_id(
 /*================*/
 	ulint	id);	/*!< in: space id */
 
+/** Look up a tablespace.
+@param[in]	name	tablespace name
+@return	tablespace
+@retval	NULL	if not found */
+fil_space_t*
+fil_space_get_by_name(const char* name);
+
 /*******************************************************************//**
 by redo log.
 @param[in,out]	space	tablespace */
