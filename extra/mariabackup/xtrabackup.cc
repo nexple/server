@@ -2394,9 +2394,13 @@ xtrabackup_scan_log_recs(
 	while (log_block < log_sys->buf + RECV_SCAN_SIZE && !*finished) {
 		ulint	no = log_block_get_hdr_no(log_block);
 		ulint	scanned_no = log_block_convert_lsn_to_no(scanned_lsn);
-		bool	checksum_is_ok = false; // FIXME
+		ulint	cksum = log_block_get_checksum(log_block);
+		bool	check = innodb_log_checksums
+			|| log_sys->log.is_encrypted();
+		ulint	crc = check
+			? log_block_calc_checksum_crc32(log_block) : 0;
 
-		if (no != scanned_no && checksum_is_ok) {
+		if (no != scanned_no && (!check || crc == cksum)) {
 			ulint blocks_in_group;
 
 			blocks_in_group = log_block_convert_lsn_to_no(
@@ -2430,16 +2434,13 @@ xtrabackup_scan_log_recs(
 			}
 
 			return(false);
-		} else if (!checksum_is_ok) {
+		} else if (check && crc != cksum) {
 			/* Garbage or an incompletely written log block */
 
 			msg("xtrabackup: warning: Log block checksum mismatch"
-			    " (block no %lu at lsn " LSN_PF "): \n"
-			    "expected %lu, calculated checksum %lu\n",
-				(ulong) no,
-				scanned_lsn,
-				(ulong) log_block_get_checksum(log_block),
-				(ulong) log_block_calc_checksum(log_block));
+			    " (block no " ULINTPF " at lsn " LSN_PF "): \n"
+			    "expected " ULINTPFx ", calculated " ULINTPFx "\n",
+			    no, scanned_lsn, cksum, crc);
 			msg("xtrabackup: warning: this is possible when the "
 			    "log block has not been fully written by the "
 			    "server, will retry later.\n");
