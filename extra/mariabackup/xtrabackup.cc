@@ -4219,6 +4219,15 @@ reread_log_header:
 		    latest_cp, log_copy_scanned_lsn);
 		exit(EXIT_FAILURE);
 	}
+
+	row_mysql_close();
+	lock_sys_close();
+	trx_pool_close();
+	fil_close();
+	log_shutdown();
+	log_mem_free();
+	recv_sys_close();
+	sync_check_close();
 }
 
 /* ================= prepare ================= */
