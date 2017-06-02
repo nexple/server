@@ -1406,9 +1406,6 @@ xb_init_log_block_size(void)
 static my_bool
 innodb_init_param(void)
 {
-	/* innobase_init */
-	static char	current_dir[3];		/* Set if using current lib */
-	char		*default_path;
 	srv_is_being_started = TRUE;
 	/* === some variables from mysqld === */
 	memset((G_PTR) &mysql_tmpdir_list, 0, sizeof(mysql_tmpdir_list));
@@ -1466,19 +1463,8 @@ innodb_init_param(void)
 		}
 	}
 
-	/* First calculate the default path for innodb_data_home_dir etc.,
-	in case the user has not given any value.
-
-	Note that when using the embedded server, the datadirectory is not
-	necessarily the current directory of this program. */
-
-	  	/* It's better to use current lib, to keep paths short */
-	  	current_dir[0] = FN_CURLIB;
-	  	current_dir[1] = FN_LIBCHAR;
-	  	current_dir[2] = 0;
-	  	default_path = current_dir;
-
-	ut_a(default_path);
+	static char default_path[2] = { FN_CURLIB, 0 };
+	fil_path_to_mysql_datadir = default_path;
 
 	/* Set InnoDB initialization parameters according to the values
 	read from MySQL .cnf file */
