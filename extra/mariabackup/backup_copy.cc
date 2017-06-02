@@ -1715,7 +1715,7 @@ copy_back()
 
 	ds_data = ds_create(dst_dir, DS_TYPE_LOCAL);
 
-	for (i = 0; i < (ulong)innobase_log_files_in_group; i++) {
+	for (i = 0; i < srv_n_log_files; i++) {
 		char filename[20];
 		sprintf(filename, "ib_logfile%lu", i);
 

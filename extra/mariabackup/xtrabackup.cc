@@ -237,7 +237,6 @@ long innobase_read_io_threads = 4;
 long innobase_write_io_threads = 4;
 long innobase_force_recovery = 0;
 long innobase_log_buffer_size = 1024*1024L;
-long innobase_log_files_in_group = 2;
 long innobase_open_files = 300L;
 
 longlong innobase_page_size = (1LL << 14); /* 16KB */
@@ -295,9 +294,7 @@ ds_ctxt_t       *ds_redo     = NULL;
 
 static bool	innobackupex_mode = false;
 
-static long	innobase_log_files_in_group_save;
 static char	*srv_log_group_home_dir_save;
-static longlong	innobase_log_file_size_save;
 
 /* String buffer used by --print-param to accumulate server options as they are
 parsed from the defaults file */
@@ -1027,7 +1024,7 @@ Disable with --skip-innodb-doublewrite.", (G_PTR*) &innobase_use_doublewrite,
   {"innodb_log_files_in_group", OPT_INNODB_LOG_FILES_IN_GROUP,
    "Number of log files in the log group. InnoDB writes to the files in a "
    "circular fashion. Value 3 is recommended here.",
-   &innobase_log_files_in_group, &innobase_log_files_in_group,
+   &srv_n_log_files, &srv_n_log_files,
    0, GET_LONG, REQUIRED_ARG, 2, 2, 100, 0, 1, 0},
   {"innodb_log_group_home_dir", OPT_INNODB_LOG_GROUP_HOME_DIR,
    "Path to InnoDB log files.", &srv_log_group_home_dir,
@@ -1259,7 +1256,7 @@ xb_get_one_option(int optid,
 
   case OPT_INNODB_LOG_FILES_IN_GROUP:
 
-    ADD_PRINT_PARAM_OPT(innobase_log_files_in_group);
+    ADD_PRINT_PARAM_OPT(srv_n_log_files);
     break;
 
   case OPT_INNODB_LOG_FILE_SIZE:
@@ -1553,7 +1550,6 @@ innodb_init_param(void)
 
 	srv_file_flush_method_str = innobase_unix_file_flush_method;
 
-	srv_n_log_files = (ulint) innobase_log_files_in_group;
 	srv_log_file_size = (ulint) innobase_log_file_size;
 	msg("xtrabackup:   innodb_log_files_in_group = %ld\n",
 	    srv_n_log_files);
@@ -4230,32 +4226,8 @@ reread_log_header:
 static bool
 xtrabackup_init_temp_log()
 {
-	pfs_os_file_t	src_file;
 	char		src_path[FN_REFLEN];
 	char		dst_path[FN_REFLEN];
-	bool		success;
-
-	byte*		log_buf= (byte *)malloc(UNIV_PAGE_SIZE_MAX * 128); /* 2 MB */
-
-	ib_int64_t	file_size;
-
-	lsn_t		max_no;
-	lsn_t		max_lsn;
-#if 0 // TODO: adjust for MariaDB 10.2.2 redo log format
-	ulint		field;
-	lsn_t		checkpoint_no;
-
-	ulint		fold;
-#endif
-	bool		checkpoint_found;
-	IORequest	logRead(IORequest::LOG | IORequest::WRITE);
-	IORequest	logWrite(IORequest::LOG | IORequest::WRITE);
-
-	max_no = 0;
-
-	if (!log_buf) {
-		goto error;
-	}
 
 	if (!xb_init_log_block_size()) {
 		goto error;
@@ -4273,259 +4245,20 @@ xtrabackup_init_temp_log()
 
 	os_normalize_path(dst_path);
 	os_normalize_path(src_path);
-#if 0 // TODO: adjust for MariaDB 10.2.2 redo log format
-retry:
-#endif
-	src_file = os_file_create_simple_no_error_handling(
-		0, src_path,
-		OS_FILE_OPEN, OS_FILE_READ_WRITE, false, &success);
-	if (!success) {
-		/* The following call prints an error message */
-		os_file_get_last_error(TRUE);
-
-		msg("xtrabackup: Warning: cannot open %s. will try to find.\n",
-		    src_path);
-
-		/* check if ib_logfile0 may be xtrabackup_logfile */
-		src_file = os_file_create_simple_no_error_handling(
-			0, dst_path,
-			OS_FILE_OPEN, OS_FILE_READ_WRITE, false, &success);
-		if (!success) {
-			os_file_get_last_error(TRUE);
-			msg("  xtrabackup: Fatal error: cannot find %s.\n",
-			    src_path);
-
-			goto error;
-		}
-
-		success = os_file_read(logRead, src_file, log_buf, 0,
-				       LOG_FILE_HDR_SIZE);
-		if (!success) {
-			goto error;
-		}
-#if 0 // TODO: adjust for MariaDB 10.2.2 redo log format
-		if ( ut_memcmp(log_buf + LOG_FILE_WAS_CREATED_BY_HOT_BACKUP,
-				(byte*)"xtrabkup", (sizeof "xtrabkup") - 1) == 0) {
-			msg("  xtrabackup: 'ib_logfile0' seems to be "
-			    "'xtrabackup_logfile'. will retry.\n");
-
-			os_file_close(src_file);
-			src_file = OS_FILE_CLOSED;
-
-			/* rename and try again */
-			success = os_file_rename(0, dst_path, src_path);
-			if (!success) {
-				goto error;
-			}
-
-			goto retry;
-		}
-#endif
-
-		msg("  xtrabackup: Fatal error: cannot find %s.\n",
-		src_path);
-
-		os_file_close(src_file);
-		src_file = OS_FILE_CLOSED;
-
-		goto error;
-	}
-
-	file_size = os_file_get_size(src_file);
-
-
-	/* TODO: We should skip the following modifies, if it is not the first time. */
-
-	/* read log file header */
-	success = os_file_read(logRead, src_file, log_buf, 0,
-			       LOG_FILE_HDR_SIZE);
-	if (!success) {
-		goto error;
-	}
-#if 0 // TODO: adjust for MariaDB 10.2.2 redo log format
-	if ( ut_memcmp(log_buf + LOG_FILE_WAS_CREATED_BY_HOT_BACKUP,
-			(byte*)"xtrabkup", (sizeof "xtrabkup") - 1) != 0 ) {
-		msg("xtrabackup: notice: xtrabackup_logfile was already used "
-		    "to '--prepare'.\n");
-		goto skip_modify;
-	} else {
-		/* clear it later */
-		//memset(log_buf + LOG_FILE_WAS_CREATED_BY_HOT_BACKUP,
-		//		' ', 4);
-	}
-#endif
-
-	checkpoint_found = false;
-#if 0 // TODO: adjust for MariaDB 10.2.2 redo log format
-	/* read last checkpoint lsn */
-	for (field = LOG_CHECKPOINT_1; field <= LOG_CHECKPOINT_2;
-			field += LOG_CHECKPOINT_2 - LOG_CHECKPOINT_1) {
-		if (!recv_check_cp_is_consistent(const_cast<const byte *>
-						 (log_buf + field)))
-			goto not_consistent;
-
-		checkpoint_no = mach_read_from_8(log_buf + field +
-						 LOG_CHECKPOINT_NO);
-
-		if (checkpoint_no >= max_no) {
-
-			max_no = checkpoint_no;
-			max_lsn = mach_read_from_8(log_buf + field +
-						   LOG_CHECKPOINT_LSN);
-			checkpoint_found = true;
-		}
-not_consistent:
-		;
-	}
-
-	if (!checkpoint_found) {
-		msg("xtrabackup: No valid checkpoint found.\n");
-		goto error;
-	}
-
-
-	/* It seems to be needed to overwrite the both checkpoint area. */
-	mach_write_to_8(log_buf + LOG_CHECKPOINT_1 + LOG_CHECKPOINT_LSN,
-			max_lsn);
-	mach_write_to_4(log_buf + LOG_CHECKPOINT_1
-			+ LOG_CHECKPOINT_OFFSET_LOW32,
-			LOG_FILE_HDR_SIZE +
-			(ulint)(max_lsn -
-			 ut_uint64_align_down(max_lsn,
-					      OS_FILE_LOG_BLOCK_SIZE)));
-	mach_write_to_4(log_buf + LOG_CHECKPOINT_1
-			+ LOG_CHECKPOINT_OFFSET_HIGH32, 0);
-	fold = ut_fold_binary(log_buf + LOG_CHECKPOINT_1, LOG_CHECKPOINT_CHECKSUM_1);
-	mach_write_to_4(log_buf + LOG_CHECKPOINT_1 + LOG_CHECKPOINT_CHECKSUM_1, fold);
-
-	fold = ut_fold_binary(log_buf + LOG_CHECKPOINT_1 + LOG_CHECKPOINT_LSN,
-		LOG_CHECKPOINT_CHECKSUM_2 - LOG_CHECKPOINT_LSN);
-	mach_write_to_4(log_buf + LOG_CHECKPOINT_1 + LOG_CHECKPOINT_CHECKSUM_2, fold);
-
-	mach_write_to_8(log_buf + LOG_CHECKPOINT_2 + LOG_CHECKPOINT_LSN,
-			max_lsn);
-	mach_write_to_4(log_buf + LOG_CHECKPOINT_2
-			+ LOG_CHECKPOINT_OFFSET_LOW32,
-			LOG_FILE_HDR_SIZE +
-			(ulint)(max_lsn -
-			 ut_uint64_align_down(max_lsn,
-					      OS_FILE_LOG_BLOCK_SIZE)));
-	mach_write_to_4(log_buf + LOG_CHECKPOINT_2
-			+ LOG_CHECKPOINT_OFFSET_HIGH32, 0);
-        fold = ut_fold_binary(log_buf + LOG_CHECKPOINT_2, LOG_CHECKPOINT_CHECKSUM_1);
-        mach_write_to_4(log_buf + LOG_CHECKPOINT_2 + LOG_CHECKPOINT_CHECKSUM_1, fold);
-
-        fold = ut_fold_binary(log_buf + LOG_CHECKPOINT_2 + LOG_CHECKPOINT_LSN,
-                LOG_CHECKPOINT_CHECKSUM_2 - LOG_CHECKPOINT_LSN);
-        mach_write_to_4(log_buf + LOG_CHECKPOINT_2 + LOG_CHECKPOINT_CHECKSUM_2, fold);
-#else
-	max_lsn = 0;
-#endif
-
-	success = os_file_write(logWrite, src_path, src_file, log_buf, 0,
-				LOG_FILE_HDR_SIZE);
-	if (!success) {
-		goto error;
-	}
-
-	/* expand file size (9/8) and align to UNIV_PAGE_SIZE_MAX */
-
-	if (file_size % UNIV_PAGE_SIZE_MAX) {
-		memset(log_buf, 0, UNIV_PAGE_SIZE_MAX);
-		success = os_file_write(logWrite, src_path, src_file, log_buf,
-					file_size,
-					UNIV_PAGE_SIZE_MAX
-					- (ulint) (file_size
-						   % UNIV_PAGE_SIZE_MAX));
-		if (!success) {
-			goto error;
-		}
-
-		file_size = os_file_get_size(src_file);
-	}
-
-	/* TODO: We should judge whether the file is already expanded or not... */
-	{
-		ulint	expand;
-
-		memset(log_buf, 0, UNIV_PAGE_SIZE_MAX * 128);
-		expand = (ulint) (file_size / UNIV_PAGE_SIZE_MAX / 8);
-
-		for (; expand > 128; expand -= 128) {
-			success = os_file_write(logWrite, src_path, src_file,
-						log_buf,
-						file_size,
-						UNIV_PAGE_SIZE_MAX * 128);
-			if (!success) {
-				goto error;
-			}
-			file_size += UNIV_PAGE_SIZE_MAX * 128;
-		}
-
-		if (expand) {
-			success = os_file_write(logWrite, src_path, src_file,
-						log_buf,
-						file_size,
-						expand * UNIV_PAGE_SIZE_MAX);
-			if (!success) {
-				goto error;
-			}
-			file_size += UNIV_PAGE_SIZE_MAX * expand;
-		}
-	}
-
-	/* make larger than 2MB */
-	if (file_size < 2*1024*1024L) {
-		memset(log_buf, 0, UNIV_PAGE_SIZE_MAX);
-		while (file_size < 2*1024*1024L) {
-			success = os_file_write(logWrite, src_path, src_file,
-						log_buf,
-						file_size,
-						UNIV_PAGE_SIZE_MAX);
-			if (!success) {
-				goto error;
-			}
-			file_size += UNIV_PAGE_SIZE_MAX;
-		}
-		file_size = os_file_get_size(src_file);
-	}
-
-	msg("xtrabackup: xtrabackup_logfile detected: size=" INT64PF ", "
-	    "start_lsn=(" LSN_PF ")\n", file_size, max_lsn);
-
-	os_file_close(src_file);
-	src_file = OS_FILE_CLOSED;
 
 	/* fake InnoDB */
-	innobase_log_files_in_group_save = innobase_log_files_in_group;
 	srv_log_group_home_dir_save = srv_log_group_home_dir;
-	innobase_log_file_size_save = innobase_log_file_size;
 
 	srv_log_group_home_dir = NULL;
-	innobase_log_file_size      = file_size;
-	innobase_log_files_in_group = 1;
 
 	srv_thread_concurrency = 0;
 
 	/* rename 'xtrabackup_logfile' to 'ib_logfile0' */
-	success = os_file_rename(0, src_path, dst_path);
-	if (!success) {
-		goto error;
+	if (os_file_rename(0, src_path, dst_path)) {
+		xtrabackup_logfile_is_renamed = TRUE;
+		return(false);
 	}
-	xtrabackup_logfile_is_renamed = TRUE;
-	free(log_buf);
-	return(false);
-#if 0 // TODO: adjust for MariaDB 10.2.2 redo log format
-skip_modify:
-	free(log_buf);
-	os_file_close(src_file);
-	src_file = OS_FILE_CLOSED;
-	return(false);
-#endif
 error:
-	free(log_buf);
-	if (src_file != OS_FILE_CLOSED)
-		os_file_close(src_file);
 	msg("xtrabackup: Error: xtrabackup_init_temp_log() failed.\n");
 	return(true); /*ERROR*/
 }
@@ -5213,9 +4946,7 @@ xtrabackup_close_temp_log()
 	}
 	xtrabackup_logfile_is_renamed = FALSE;
 
-	innobase_log_files_in_group = innobase_log_files_in_group_save;
 	srv_log_group_home_dir = srv_log_group_home_dir_save;
-	innobase_log_file_size = innobase_log_file_size_save;
 
 	return(false);
 }

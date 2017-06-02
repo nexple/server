@@ -496,7 +496,7 @@ get_mysql_vars(MYSQL *connection)
 	    && innodb_log_files_in_group_var) {
 		char *endptr;
 
-		innobase_log_files_in_group = strtol(
+		srv_n_log_files = strtol(
 			innodb_log_files_in_group_var, &endptr, 10);
 		ut_ad(*endptr == 0);
 	}
