@@ -2466,6 +2466,7 @@ xtrabackup_scan_log_recs(
 	/* ===== write log to 'xtrabackup_logfile' ====== */
 	if (!*finished) {
 		write_size = RECV_SCAN_SIZE;
+		ut_ad(!is_last);
 	} else {
 		write_size = (ulint)(ut_uint64_align_up(scanned_lsn,
 					OS_FILE_LOG_BLOCK_SIZE) - start_lsn);
@@ -3597,8 +3598,6 @@ open_or_create_log_file(
 					created */
 	ulint	i)			/*!< in: log file number in group */
 {
-	ibool	ret;
-	os_offset_t	size;
 	char	name[10000];
 	ulint	dirnamelen;
 
@@ -3616,30 +3615,6 @@ open_or_create_log_file(
 	}
 
 	sprintf(name + dirnamelen, "%s%lu", "ib_logfile", (ulong) i);
-  bool success;
-	files[i] = os_file_create(0, name, OS_FILE_OPEN, OS_FILE_NORMAL,OS_LOG_FILE, true, &success);
-	if (!success) {
-		fprintf(stderr, "InnoDB: Error in opening %s\n", name);
-
-		return(DB_ERROR);
-	}
-
-	size = os_file_get_size(files[i]);
-
-	if (size != srv_log_file_size * UNIV_PAGE_SIZE) {
-
-		fprintf(stderr,
-			"InnoDB: Error: log file %s is"
-			" of different size " UINT64PF " bytes\n"
-			"InnoDB: than specified in the .cnf"
-			" file " UINT64PF " bytes!\n",
-			name, size, srv_log_file_size * UNIV_PAGE_SIZE);
-
-		return(DB_ERROR);
-	}
-
-	ret = os_file_close(files[i]);
-	ut_a(ret);
 
 	ut_a(fil_validate());
 
