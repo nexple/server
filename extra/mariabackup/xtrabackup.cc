@@ -243,7 +243,6 @@ char*	innobase_doublewrite_file = NULL;
 char*	innobase_buffer_pool_filename = NULL;
 
 longlong innobase_buffer_pool_size = 8*1024*1024L;
-longlong innobase_log_file_size = 48*1024*1024L;
 
 /* The default values for the following char* start-up parameters
 are determined in innobase_init below: */
@@ -1016,14 +1015,13 @@ Disable with --skip-innodb-doublewrite.", (G_PTR*) &innobase_use_doublewrite,
    GET_LONG, REQUIRED_ARG, 1024*1024L, 256*1024L, LONG_MAX, 0, 1024, 0},
   {"innodb_log_file_size", OPT_INNODB_LOG_FILE_SIZE,
    "Size of each log file in a log group.",
-   (G_PTR*) &innobase_log_file_size, (G_PTR*) &innobase_log_file_size, 0,
-   GET_LL, REQUIRED_ARG, 48*1024*1024L, 1*1024*1024L, LONGLONG_MAX, 0,
-   1024*1024L, 0},
+   (G_PTR*) &srv_log_file_size, (G_PTR*) &srv_log_file_size, 0,
+   GET_ULL, REQUIRED_ARG, 48 << 20, 1 << 20, 512ULL << 30, 0,
+   UNIV_PAGE_SIZE_MAX, 0},
   {"innodb_log_files_in_group", OPT_INNODB_LOG_FILES_IN_GROUP,
-   "Number of log files in the log group. InnoDB writes to the files in a "
-   "circular fashion. Value 3 is recommended here.",
+   "Number of redo log files",
    &srv_n_log_files, &srv_n_log_files,
-   0, GET_LONG, REQUIRED_ARG, 2, 2, 100, 0, 1, 0},
+   0, GET_LONG, REQUIRED_ARG, 1, 1, 100, 0, 1, 0},
   {"innodb_log_group_home_dir", OPT_INNODB_LOG_GROUP_HOME_DIR,
    "Path to InnoDB log files.", &srv_log_group_home_dir,
    &srv_log_group_home_dir, 0, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
@@ -1259,7 +1257,7 @@ xb_get_one_option(int optid,
 
   case OPT_INNODB_LOG_FILE_SIZE:
 
-    ADD_PRINT_PARAM_OPT(innobase_log_file_size);
+    ADD_PRINT_PARAM_OPT(srv_log_file_size);
     break;
 
   case OPT_INNODB_FLUSH_METHOD:
@@ -1449,13 +1447,6 @@ innodb_init_param(void)
 
 			goto error;
 		}
-
-		if (innobase_log_file_size > UINT_MAX32) {
-			msg("xtrabackup: innobase_log_file_size can't be "
-			    "over 4GB on 32-bit systemsi\n");
-
-			goto error;
-		}
 	}
 
 	static char default_path[2] = { FN_CURLIB, 0 };
@@ -1548,11 +1539,9 @@ innodb_init_param(void)
 
 	srv_file_flush_method_str = innobase_unix_file_flush_method;
 
-	srv_log_file_size = (ulint) innobase_log_file_size;
 	msg("xtrabackup:   innodb_log_files_in_group = %ld\n",
 	    srv_n_log_files);
-	msg("xtrabackup:   innodb_log_file_size = %lld\n",
-	    (long long int) srv_log_file_size);
+	msg("xtrabackup:   innodb_log_file_size = %llu\n", srv_log_file_size);
 
 	srv_log_buffer_size = (ulint) innobase_log_buffer_size;
 
@@ -3632,7 +3621,6 @@ xb_normalize_init_values(void)
 /*==========================*/
 {
 	srv_sys_space.normalize();
-	srv_log_file_size /= UNIV_PAGE_SIZE;
 	srv_log_buffer_size /= UNIV_PAGE_SIZE;
 	srv_lock_table_size = 5 * (srv_buf_pool_size / UNIV_PAGE_SIZE);
 }
@@ -3827,7 +3815,7 @@ xtrabackup_backup_func(void)
 	xb_fil_io_init();
 
 	log_sys_init();
-	log_init(srv_n_log_files, srv_log_file_size * UNIV_PAGE_SIZE);
+	log_init(srv_n_log_files);
 	fil_space_t*	space = fil_space_create(
 		"innodb_redo_log", SRV_LOG_SPACE_FIRST_ID, 0,
 		FIL_TYPE_LOG, NULL);
@@ -4203,7 +4191,7 @@ xtrabackup_init_temp_log()
 
 	srv_log_group_home_dir = NULL;
 
-	srv_thread_concurrency = 0;
+	srv_thread_concurrency = 1;
 
 	/* rename 'xtrabackup_logfile' to 'ib_logfile0' */
 	if (os_file_rename(0, src_path, dst_path)) {

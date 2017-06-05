@@ -505,7 +505,7 @@ get_mysql_vars(MYSQL *connection)
 	    && innodb_log_file_size_var) {
 		char *endptr;
 
-		innobase_log_file_size = strtoll(
+		srv_log_file_size = strtoll(
 			innodb_log_file_size_var, &endptr, 10);
 		ut_ad(*endptr == 0);
 	}
@@ -1529,7 +1529,7 @@ bool write_backup_config_file()
 		"innodb_checksum_algorithm=%s\n"
 		"innodb_data_file_path=%s\n"
 		"innodb_log_files_in_group=%lu\n"
-		"innodb_log_file_size=%lld\n"
+		"innodb_log_file_size=%llu\n"
 		"innodb_page_size=%lu\n"
 		"innodb_log_block_size=%lu\n"
 		"innodb_undo_directory=%s\n"
@@ -1540,7 +1540,7 @@ bool write_backup_config_file()
 		innodb_checksum_algorithm_names[srv_checksum_algorithm],
 		innobase_data_file_path,
 		srv_n_log_files,
-		innobase_log_file_size,
+		srv_log_file_size,
 		srv_page_size,
 		srv_log_write_ahead_size,
 		srv_undo_dir,

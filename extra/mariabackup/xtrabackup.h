@@ -79,7 +79,6 @@ extern my_bool		xtrabackup_decrypt_decompress;
 
 extern char		*innobase_data_file_path;
 extern char		*innobase_doublewrite_file;
-extern longlong		innobase_log_file_size;
 extern longlong		innobase_page_size;
 
 extern int		xtrabackup_parallel;
