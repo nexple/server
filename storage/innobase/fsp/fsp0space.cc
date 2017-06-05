@@ -60,7 +60,8 @@ Tablespace::shutdown()
 	}
 
 	m_files.clear();
-
+	ut_free(m_path);
+	m_path = NULL;
 	m_space_id = ULINT_UNDEFINED;
 }
 

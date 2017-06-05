@@ -2795,21 +2795,23 @@ innodb_shutdown()
 	ut_ad(!srv_running);
 	ut_ad(!srv_undo_sources);
 
-	/* 1. Flush the buffer pool to disk, write the current lsn to
-	the tablespace header(s), and copy all log data to archive.
-	The step 1 is the real InnoDB shutdown. The remaining steps 2 - ...
-	just free data structures after the shutdown. */
+	switch (srv_operation) {
+	case SRV_OPERATION_BACKUP:
+		break;
+	case SRV_OPERATION_NORMAL:
+	case SRV_OPERATION_RESTORE:
+		/* Shut down the persistent files. */
+		logs_empty_and_mark_files_at_shutdown();
 
-	logs_empty_and_mark_files_at_shutdown();
+		if (ulint n_threads = srv_conc_get_active_threads()) {
+			ib::warn() << "Query counter shows "
+				   << n_threads << " queries still"
+				" inside InnoDB at shutdown";
+		}
 
-	if (ulint n_threads = srv_conc_get_active_threads()) {
-		ib::warn() << "Query counter shows "
-			<< n_threads << " queries still"
-			" inside InnoDB at shutdown";
+		/* Exit any remaining threads. */
+		srv_shutdown_all_bg_threads();
 	}
-
-	/* 2. Make all threads created by InnoDB to exit */
-	srv_shutdown_all_bg_threads();
 
 	if (srv_monitor_file) {
 		fclose(srv_monitor_file);

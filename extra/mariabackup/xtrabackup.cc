@@ -108,8 +108,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 int sys_var_init();
 
-my_bool innodb_inited= 0;
-
 /* === xtrabackup specific options === */
 char xtrabackup_real_target_dir[FN_REFLEN] = "./xtrabackup_backupfiles/";
 char *xtrabackup_target_dir= xtrabackup_real_target_dir;
@@ -1561,8 +1559,9 @@ innodb_init_param(void)
         /* We set srv_pool_size here in units of 1 kB. InnoDB internally
         changes the value so that it becomes the number of database pages. */
 
-	//srv_buf_pool_size = (ulint) innobase_buffer_pool_size;
 	srv_buf_pool_size = (ulint) xtrabackup_use_memory;
+	srv_buf_pool_chunk_unit = srv_buf_pool_size;
+	srv_buf_pool_instances = 1;
 
 	srv_n_file_io_threads = (ulint) innobase_file_io_threads;
 	srv_n_read_io_threads = (ulint) innobase_read_io_threads;
@@ -1648,53 +1647,28 @@ error:
 static my_bool
 innodb_init(void)
 {
-	int	err;
-	srv_is_being_started = TRUE;
-	err = innobase_start_or_create_for_mysql();
-
+	dberr_t err = innobase_start_or_create_for_mysql();
 	if (err != DB_SUCCESS) {
 		free(internal_innobase_data_file_path);
 		internal_innobase_data_file_path = NULL;
-		goto error;
+		msg("xtrabackup: innodb_init() returned %d (%s).\n",
+		    err, ut_strerr(err));
+		innodb_shutdown();
+		return(TRUE);
 	}
 
-	/* They may not be needed for now */
-//	(void) hash_init(&innobase_open_tables,system_charset_info, 32, 0, 0,
-//			 		(hash_get_key) innobase_get_key, 0, 0);
-//        pthread_mutex_init(&innobase_share_mutex, MY_MUTEX_INIT_FAST);
-//        pthread_mutex_init(&prepare_commit_mutex, MY_MUTEX_INIT_FAST);
-//        pthread_mutex_init(&commit_threads_m, MY_MUTEX_INIT_FAST);
-//        pthread_mutex_init(&commit_cond_m, MY_MUTEX_INIT_FAST);
-//        pthread_cond_init(&commit_cond, NULL);
-
-	innodb_inited= 1;
-
 	return(FALSE);
-
-error:
-	msg("xtrabackup: innodb_init(): Error occured.\n");
-	return(TRUE);
 }
 
 static void
 innodb_end()
 {
-	innodb_inited = 0;
-
 	msg("xtrabackup: starting shutdown with innodb_fast_shutdown = %u\n",
 	    srv_fast_shutdown);
 
 	innodb_shutdown();
 	free(internal_innobase_data_file_path);
 	internal_innobase_data_file_path = NULL;
-
-	/* They may not be needed for now */
-//	hash_free(&innobase_open_tables);
-//	pthread_mutex_destroy(&innobase_share_mutex);
-//	pthread_mutex_destroy(&prepare_commit_mutex);
-//	pthread_mutex_destroy(&commit_threads_m);
-//	pthread_mutex_destroy(&commit_cond_m);
-//	pthread_cond_destroy(&commit_cond);
 }
 
 /* ================= common ================= */
@@ -3851,6 +3825,7 @@ xtrabackup_backup_func(void)
         }
 
 	sync_check_init();
+	ut_d(sync_check_enable());
 	/* Reset the system variables in the recovery module. */
 	recv_sys_var_init();
 	trx_pool_init();
@@ -4220,14 +4195,7 @@ reread_log_header:
 		exit(EXIT_FAILURE);
 	}
 
-	row_mysql_close();
-	lock_sys_close();
-	trx_pool_close();
-	fil_close();
-	log_shutdown();
-	log_mem_free();
-	recv_sys_close();
-	sync_check_close();
+	innodb_shutdown();
 }
 
 /* ================= prepare ================= */
@@ -5309,6 +5277,7 @@ static
 void
 innodb_free_param()
 {
+	srv_sys_space.shutdown();
 	free(internal_innobase_data_file_path);
 	internal_innobase_data_file_path = NULL;
 	free_tmpdir(&mysql_tmpdir_list);
@@ -5407,6 +5376,7 @@ skip_check:
 	srv_page_size_shift = 14;
 	srv_page_size = (1 << srv_page_size_shift);
 	sync_check_init();
+	ut_d(sync_check_enable());
 	ut_crc32_init();
 	recv_sys_init();
 
@@ -5461,8 +5431,8 @@ error:
 	}
 	fil_close();
 	innodb_free_param();
-	sync_check_close();
 	recv_sys_close();
+	sync_check_close();
 
 	/* Reset the configuration as it might have been changed by
 	xb_data_files_init(). */
@@ -5765,15 +5735,12 @@ next_node:
 #endif
 
 	innodb_end();
-
-        innodb_free_param();
-
-	sync_check_close();
-	recv_sys_close();
+	innodb_free_param();
 
 	/* re-init necessary components */
 	recv_sys_init();
 	sync_check_init();
+	ut_d(sync_check_enable());
 
 	if (xtrabackup_close_temp_log())
 		exit(EXIT_FAILURE);
@@ -5814,9 +5781,12 @@ next_node:
 		exit(EXIT_FAILURE);
 	}
 
-	sync_check_close();
 	recv_sys_close();
 	fil_close();
+	if (buf_pool_ptr) {
+		buf_pool_free(srv_buf_pool_instances);
+	}
+	sync_check_close();
 
 	srv_force_recovery = save_force_recovery;
 
