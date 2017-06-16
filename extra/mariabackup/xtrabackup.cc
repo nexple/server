@@ -3682,8 +3682,11 @@ end:
 #endif
 }
 
-void
-xtrabackup_backup_func(void)
+/** Implement --backup
+@return	whether the operation succeeded */
+static
+bool
+xtrabackup_backup_func()
 {
 	MY_STAT			 stat_info;
 	lsn_t			 latest_cp;
@@ -3701,7 +3704,7 @@ xtrabackup_backup_func(void)
 	if (my_setwd(mysql_real_data_home,MYF(MY_WME)))
 	{
 		msg("xtrabackup: cannot my_setwd %s\n", mysql_real_data_home);
-		exit(EXIT_FAILURE);
+		return(false);
 	}
 	msg("xtrabackup: cd to %s\n", mysql_real_data_home);
 
@@ -3725,8 +3728,11 @@ xtrabackup_backup_func(void)
 		    "produced.\n");
 
 	/* initialize components */
-        if(innodb_init_param())
-                exit(EXIT_FAILURE);
+        if(innodb_init_param()) {
+fail:
+		innodb_shutdown();
+		return(false);
+	}
 
 	xb_normalize_init_values();
 
@@ -3825,9 +3831,7 @@ xtrabackup_backup_func(void)
 	for (i = 0; i < srv_n_log_files; i++) {
 		err = open_or_create_log_file(space, &log_file_created, i);
 		if (err != DB_SUCCESS) {
-
-			//return((int) err);
-			exit(EXIT_FAILURE);
+			goto fail;
 		}
 
 		if (log_file_created) {
@@ -3844,15 +3848,14 @@ xtrabackup_backup_func(void)
 	"xtrabackup: Then delete the existing log files. Edit the .cnf file\n"
 	"xtrabackup: and start the database again.\n");
 
-			//return(DB_ERROR);
-			exit(EXIT_FAILURE);
+			goto fail;
 		}
 	}
 
 	/* log_file_created must not be TRUE, if online */
 	if (log_file_created) {
 		msg("xtrabackup: Something wrong with source files...\n");
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 
 	}
@@ -3863,7 +3866,7 @@ xtrabackup_backup_func(void)
 		&& (my_mkdir(xtrabackup_extra_lsndir,0777,MYF(0)) < 0)) {
 		msg("xtrabackup: Error: cannot mkdir %d: %s\n",
 		    my_errno, xtrabackup_extra_lsndir);
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 
 	/* create target dir if not exist */
@@ -3871,7 +3874,7 @@ xtrabackup_backup_func(void)
 		&& (my_mkdir(xtrabackup_target_dir,0777,MYF(0)) < 0)){
 		msg("xtrabackup: Error: cannot mkdir %d: %s\n",
 		    my_errno, xtrabackup_target_dir);
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 
         {
@@ -3890,14 +3893,17 @@ xtrabackup_backup_func(void)
 	dberr_t err = recv_find_max_checkpoint(&max_cp_field);
 
 	if (err != DB_SUCCESS) {
-		exit(EXIT_FAILURE);
+log_fail:
+		log_mutex_exit();
+		goto fail;
 	}
 
 	if (log_sys->log.format == 0) {
 old_format:
 		msg("xtrabackup: Error: cannot process redo log"
 		    " before MariaDB 10.2.2\n");
-		exit(EXIT_FAILURE);
+		log_mutex_exit();
+		goto log_fail;
 	}
 
 	ut_ad(!((log_sys->log.format ^ LOG_HEADER_FORMAT_CURRENT)
@@ -3912,7 +3918,7 @@ reread_log_header:
 	err = recv_find_max_checkpoint(&max_cp_field);
 
 	if (err != DB_SUCCESS) {
-		exit(EXIT_FAILURE);
+		goto log_fail;
 	}
 
 	if (log_sys->log.format == 0) {
@@ -3934,7 +3940,7 @@ reread_log_header:
 	xtrabackup_init_datasinks();
 
 	if (!select_history()) {
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 
 	/* open the log file */
@@ -3943,7 +3949,7 @@ reread_log_header:
 	if (dst_log_file == NULL) {
 		msg("xtrabackup: error: failed to open the target stream for "
 		    "'%s'.\n", XB_LOG_FILENAME);
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 
 	/* label it */
@@ -3964,7 +3970,7 @@ reread_log_header:
 	    || ds_write(dst_log_file, log_hdr, sizeof log_hdr)
 	    || ds_write(dst_log_file, log_hdr, sizeof log_hdr)) {
 		msg("xtrabackup: error: write to logfile failed\n");
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 
 	/* start flag */
@@ -3983,7 +3989,7 @@ reread_log_header:
 
 	/* copy log file by current position */
 	if(xtrabackup_copy_logfile(checkpoint_lsn_start, FALSE))
-		exit(EXIT_FAILURE);
+		goto fail;
 
 
 	log_copying_stop = os_event_create(0);
@@ -3994,12 +4000,12 @@ reread_log_header:
 	if (err != DB_SUCCESS) {
 		msg("xtrabackup: error: xb_load_tablespaces() failed with"
 		    "error code %u\n", err);
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 
 	/* FLUSH CHANGED_PAGE_BITMAPS call */
 	if (!flush_changed_page_bitmaps()) {
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 	debug_sync_point("xtrabackup_suspend_at_start");
 
@@ -4027,7 +4033,7 @@ reread_log_header:
 	it = datafiles_iter_new(fil_system);
 	if (it == NULL) {
 		msg("xtrabackup: Error: datafiles_iter_new() failed.\n");
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 
 	/* Create data copying threads */
@@ -4100,7 +4106,7 @@ reread_log_header:
 
 	os_event_destroy(log_copying_stop);
 	if (ds_close(dst_log_file)) {
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 
 	if(!xtrabackup_incremental) {
@@ -4115,7 +4121,7 @@ reread_log_header:
 
 	if (!xtrabackup_stream_metadata(ds_meta)) {
 		msg("xtrabackup: Error: failed to stream metadata.\n");
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 	if (xtrabackup_extra_lsndir) {
 		char	filename[FN_REFLEN];
@@ -4125,13 +4131,13 @@ reread_log_header:
 		if (!xtrabackup_write_metadata(filename)) {
 			msg("xtrabackup: Error: failed to write metadata "
 			    "to '%s'.\n", filename);
-			exit(EXIT_FAILURE);
+			goto fail;
 		}
 
 	}
 
 	if (!backup_finish()) {
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 
 	xtrabackup_destroy_datasinks();
@@ -4155,10 +4161,11 @@ reread_log_header:
 		msg("xtrabackup: error: last checkpoint LSN (" LSN_PF
 		    ") is larger than last copied LSN (" LSN_PF ").\n",
 		    latest_cp, log_copy_scanned_lsn);
-		exit(EXIT_FAILURE);
+		goto fail;
 	}
 
 	innodb_shutdown();
+	return(true);
 }
 
 /* ================= prepare ================= */
@@ -6307,8 +6314,9 @@ int main(int argc, char **argv)
 #endif
 
 	/* --backup */
-	if (xtrabackup_backup)
-		xtrabackup_backup_func();
+	if (xtrabackup_backup && !xtrabackup_backup_func()) {
+		exit(EXIT_FAILURE);
+	}
 
 	/* --prepare */
 	if (xtrabackup_prepare) {
