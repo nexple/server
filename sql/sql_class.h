@@ -6046,6 +6046,23 @@ public:
   }
 };
 
+/* Functions to compare if two lex strings are equal */
+inline bool lex_string_cmp(CHARSET_INFO *charset,
+                           const LEX_CSTRING *a,
+                           const LEX_CSTRING *b)
+{
+  if (a->length != b->length)
+    return 1;                                   /* Different */
+  return my_strcasecmp(charset, a->str, b->str) != 0;
+}
+
+inline bool lex_string_cmp(const LEX_CSTRING *a,
+                           const LEX_CSTRING *b)
+{
+  if (a->length != b->length)
+    return 1;                                   /* Different */
+  return strcmp(a->str, b->str) != 0;
+}
 
 #endif /* MYSQL_SERVER */
 
