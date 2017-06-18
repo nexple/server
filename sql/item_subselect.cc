@@ -4375,7 +4375,7 @@ void subselect_uniquesubquery_engine::print(String *str,
     str->append(table_name, tab->table->s->table_name.length);
   KEY *key_info= tab->table->key_info+ tab->ref.key;
   str->append(STRING_WITH_LEN(" on "));
-  str->append(key_info->name);
+  str->append(key_info->name.str, key_info->name.length);
   if (cond)
   {
     str->append(STRING_WITH_LEN(" where "));
@@ -4398,7 +4398,7 @@ void subselect_uniquesubquery_engine::print(String *str)
   str->append(STRING_WITH_LEN(" in "));
   str->append(tab->table->s->table_name.str, tab->table->s->table_name.length);
   str->append(STRING_WITH_LEN(" on "));
-  str->append(key_info->name);
+  str->append(key_info->name.str);
   if (cond)
   {
     str->append(STRING_WITH_LEN(" where "));
@@ -4417,7 +4417,7 @@ void subselect_indexsubquery_engine::print(String *str,
   str->append(tab->table->s->table_name.str, tab->table->s->table_name.length);
   KEY *key_info= tab->table->key_info+ tab->ref.key;
   str->append(STRING_WITH_LEN(" on "));
-  str->append(key_info->name);
+  str->append(key_info->name.str, key_info->name.length);
   if (check_null)
     str->append(STRING_WITH_LEN(" checking NULL"));
   if (cond)

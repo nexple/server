@@ -81,6 +81,9 @@ const char *join_type_str[]={ "UNKNOWN","system","const","eq_ref","ref",
                               "index_merge", "hash_ALL", "hash_range",
                               "hash_index", "hash_index_merge" };
 
+LEX_CSTRING group_key= {STRING_WITH_LEN("group_key")};
+LEX_CSTRING distinct_key= {STRING_WITH_LEN("distinct_key")};
+
 struct st_sargable_param;
 
 static void optimize_keyuse(JOIN *join, DYNAMIC_ARRAY *keyuse_array);
@@ -6216,7 +6219,7 @@ best_access_path(JOIN      *join,
 
       loose_scan_opt.next_ref_key();
       DBUG_PRINT("info", ("Considering ref access on key %s",
-                          keyuse->table->key_info[keyuse->key].name));
+                          keyuse->table->key_info[keyuse->key].name.str));
 
       do /* For each keypart */
       {
@@ -9000,7 +9003,8 @@ static bool create_hj_key_for_table(JOIN *join, JOIN_TAB *join_tab,
   keyinfo->algorithm= HA_KEY_ALG_UNDEF;
   keyinfo->flags= HA_GENERATED_KEY;
   keyinfo->is_statistics_from_stat_tables= FALSE;
-  keyinfo->name= (char *) "$hj";
+  keyinfo->name.str= "$hj";
+  keyinfo->name.length= 3;
   keyinfo->rec_per_key= (ulong*) thd->calloc(sizeof(ulong)*key_parts);
   if (!keyinfo->rec_per_key)
     DBUG_RETURN(TRUE);
@@ -16884,7 +16888,7 @@ create_tmp_table(THD *thd, TMP_TABLE_PARAM *param, List<Item> &fields,
     keyinfo->collected_stats= NULL;
     keyinfo->algorithm= HA_KEY_ALG_UNDEF;
     keyinfo->is_statistics_from_stat_tables= FALSE;
-    keyinfo->name= (char*) "group_key";
+    keyinfo->name= group_key;
     ORDER *cur_group= group;
     for (; cur_group ; cur_group= cur_group->next, key_part_info++)
     {
@@ -16995,7 +16999,7 @@ create_tmp_table(THD *thd, TMP_TABLE_PARAM *param, List<Item> &fields,
     keyinfo->flags=HA_NOSAME | HA_NULL_ARE_EQUAL | HA_BINARY_PACK_KEY | HA_PACK_KEY;
     keyinfo->ext_key_flags= keyinfo->flags;
     keyinfo->key_length= 0;  // Will compute the sum of the parts below.
-    keyinfo->name= (char*) "distinct_key";
+    keyinfo->name= distinct_key;
     keyinfo->algorithm= HA_KEY_ALG_UNDEF;
     keyinfo->is_statistics_from_stat_tables= FALSE;
     keyinfo->read_stats= NULL;
@@ -24058,7 +24062,7 @@ int append_possible_keys(MEM_ROOT *alloc, String_list &list, TABLE *table,
   for (j=0 ; j < table->s->keys ; j++)
   {
     if (possible_keys.is_set(j))
-      list.append_str(alloc, table->key_info[j].name);
+      list.append_str(alloc, table->key_info[j].name.str);
   }
   return 0;
 }

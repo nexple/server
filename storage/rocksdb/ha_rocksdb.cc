@@ -5151,7 +5151,7 @@ std::unordered_map<std::string, uint> ha_rocksdb::get_old_key_positions(
       ALTER TABLE t1 DROP INDEX ka, ADD INDEX ka(b), ALGORITHM=INPLACE;
     */
     const KEY *const old_key = &old_table_arg->key_info[i];
-    const auto &it = new_key_pos.find(old_key->name);
+    const auto &it = new_key_pos.find(old_key->name.str);
     if (it == new_key_pos.end()) {
       continue;
     }
@@ -5159,7 +5159,7 @@ std::unordered_map<std::string, uint> ha_rocksdb::get_old_key_positions(
     KEY *const new_key = &table_arg->key_info[it->second];
 
     if (!compare_key_parts(old_key, new_key)) {
-      old_key_pos[old_key->name] = i;
+      old_key_pos[old_key->name.str] = i;
     }
   }
 
@@ -6994,9 +6994,9 @@ const char *ha_rocksdb::get_key_name(const uint index,
   }
 
   DBUG_ASSERT(table_arg->key_info != nullptr);
-  DBUG_ASSERT(table_arg->key_info[index].name != nullptr);
+  DBUG_ASSERT(table_arg->key_info[index].name.str != nullptr);
 
-  return table_arg->key_info[index].name;
+  return table_arg->key_info[index].name.str;
 }
 
 const char *ha_rocksdb::get_key_comment(const uint index,
@@ -9430,7 +9430,7 @@ bool ha_rocksdb::prepare_inplace_alter_table(
   for (i = 0; i < ha_alter_info->index_drop_count; i++) {
     const KEY *const key = ha_alter_info->index_drop_buffer[i];
     for (j = 0; j < old_n_keys; j++) {
-      if (!old_key_descr[j]->m_name.compare(key->name)) {
+      if (!old_key_descr[j]->m_name.compare(key->name.str)) {
         dropped_index_ids.insert(old_key_descr[j]->get_gl_index_id());
         break;
       }
@@ -9443,7 +9443,7 @@ bool ha_rocksdb::prepare_inplace_alter_table(
   for (i = 0; i < ha_alter_info->index_add_count; i++) {
     key = &ha_alter_info->key_info_buffer[ha_alter_info->index_add_buffer[i]];
     for (j = 0; j < new_n_keys; j++) {
-      if (!new_key_descr[j]->m_name.compare(key->name)) {
+      if (!new_key_descr[j]->m_name.compare(key->name.str)) {
         added_indexes.insert(new_key_descr[j]);
         break;
       }
