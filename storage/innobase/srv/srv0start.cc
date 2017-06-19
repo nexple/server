@@ -1294,8 +1294,15 @@ srv_shutdown_all_bg_threads()
 			}
 		}
 
-		if (!buf_page_cleaner_is_active && os_aio_all_slots_free()) {
-			os_aio_wake_all_threads_at_shutdown();
+		switch (srv_operation) {
+		case SRV_OPERATION_BACKUP:
+			break;
+		case SRV_OPERATION_NORMAL:
+		case SRV_OPERATION_RESTORE:
+			if (!buf_page_cleaner_is_active
+			    && os_aio_all_slots_free()) {
+				os_aio_wake_all_threads_at_shutdown();
+			}
 		}
 
 		const bool active = os_thread_active();
