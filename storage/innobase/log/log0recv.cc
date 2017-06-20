@@ -2413,6 +2413,13 @@ loop:
 					recv_sys->recovered_lsn);
 			}
 			/* fall through */
+		case MLOG_INDEX_LOAD:
+			/* Mariabackup FIXME: Report an error
+			when encountering MLOG_INDEX_LOAD on
+			--prepare or already on --backup. */
+			ut_a(type != MLOG_INDEX_LOAD
+			     || srv_operation == SRV_OPERATION_NORMAL);
+			/* fall through */
 		case MLOG_FILE_NAME:
 		case MLOG_FILE_DELETE:
 		case MLOG_FILE_CREATE2:
@@ -2421,7 +2428,6 @@ loop:
 			/* These were already handled by
 			recv_parse_log_rec() and
 			recv_parse_or_apply_log_rec_body(). */
-		case MLOG_INDEX_LOAD:
 			DBUG_PRINT("ib_log",
 				("scan " LSN_PF ": log rec %s"
 				" len " ULINTPF
@@ -2559,11 +2565,16 @@ loop:
 				for something else. */
 				break;
 #endif /* UNIV_LOG_LSN_DEBUG */
+			case MLOG_INDEX_LOAD:
+				/* Mariabackup FIXME: Report an error
+				when encountering MLOG_INDEX_LOAD on
+				--prepare or already on --backup. */
+				ut_a(srv_operation == SRV_OPERATION_NORMAL);
+				break;
 			case MLOG_FILE_NAME:
 			case MLOG_FILE_DELETE:
 			case MLOG_FILE_CREATE2:
 			case MLOG_FILE_RENAME2:
-			case MLOG_INDEX_LOAD:
 			case MLOG_TRUNCATE:
 				/* These were already handled by
 				recv_parse_log_rec() and
