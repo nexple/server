@@ -1762,7 +1762,7 @@ copy_back()
 	datadir_node_init(&node);
 
 	while (datadir_iter_next(it, &node)) {
-		const char *ext_list[] = {"backup-my.cnf", "xtrabackup_logfile",
+		const char *ext_list[] = {"backup-my.cnf", "ib_logfile0",
 			"xtrabackup_binary", "xtrabackup_binlog_info",
 			"xtrabackup_checkpoints", ".qp", ".pmap", ".tmp",
 			NULL};

@@ -184,8 +184,6 @@ ibool log_copying = TRUE;
 ibool log_copying_running = FALSE;
 ibool io_watching_thread_running = FALSE;
 
-ibool xtrabackup_logfile_is_renamed = FALSE;
-
 int xtrabackup_parallel;
 
 char *xtrabackup_stream_str = NULL;
@@ -212,8 +210,6 @@ char metadata_type[30] = ""; /*[full-backuped|log-applied|
 lsn_t metadata_from_lsn = 0;
 lsn_t metadata_to_lsn = 0;
 lsn_t metadata_last_lsn = 0;
-
-static const char XB_LOG_FILENAME[] = "xtrabackup_logfile";
 
 ds_file_t	*dst_log_file = NULL;
 
@@ -292,8 +288,6 @@ ds_ctxt_t       *ds_meta     = NULL;
 ds_ctxt_t       *ds_redo     = NULL;
 
 static bool	innobackupex_mode = false;
-
-static char	*srv_log_group_home_dir_save;
 
 /* String buffer used by --print-param to accumulate server options as they are
 parsed from the defaults file */
@@ -2391,7 +2385,6 @@ xtrabackup_copy_log(bool is_last, lsn_t start_lsn, lsn_t end_lsn)
 		}
 	}
 
-	/* ===== write log to 'xtrabackup_logfile' ====== */
 	if (!is_last && scanned_lsn & (OS_FILE_LOG_BLOCK_SIZE - 1)) {
 		/* Omit the partial last block. */
 		scanned_lsn &= ~(OS_FILE_LOG_BLOCK_SIZE - 1);
@@ -2622,7 +2615,7 @@ Initialize the appropriate datasink(s). Both local backups and streaming in the
 
 Otherwise (i.e. when streaming in the 'tar' format) we need 2 separate datasinks
 for the data stream (and don't allow parallel data copying) and for metainfo
-files (including xtrabackup_logfile). The second datasink writes to temporary
+files (including ib_logfile0). The second datasink writes to temporary
 files first, and then streams them in a serialized way when closed. */
 static void
 xtrabackup_init_datasinks(void)
@@ -3866,10 +3859,10 @@ reread_log_header:
 
 	/* open the log file */
 	memset(&stat_info, 0, sizeof(MY_STAT));
-	dst_log_file = ds_open(ds_redo, XB_LOG_FILENAME, &stat_info);
+	dst_log_file = ds_open(ds_redo, "ib_logfile0", &stat_info);
 	if (dst_log_file == NULL) {
 		msg("xtrabackup: error: failed to open the target stream for "
-		    "'%s'.\n", XB_LOG_FILENAME);
+		    "'ib_logfile0'.\n");
 		goto fail;
 	}
 
@@ -4077,7 +4070,7 @@ reread_log_header:
 
 	xb_data_files_close();
 
-	/* Make sure that the latest checkpoint made it to xtrabackup_logfile */
+	/* Make sure that the latest checkpoint was included */
 	if (latest_cp > log_copy_scanned_lsn) {
 		msg("xtrabackup: error: last checkpoint LSN (" LSN_PF
 		    ") is larger than last copied LSN (" LSN_PF ").\n",
@@ -4090,46 +4083,6 @@ reread_log_header:
 }
 
 /* ================= prepare ================= */
-
-static bool
-xtrabackup_init_temp_log()
-{
-	char		src_path[FN_REFLEN];
-	char		dst_path[FN_REFLEN];
-
-	if (!xb_init_log_block_size()) {
-		goto error;
-	}
-
-	if(!xtrabackup_incremental_dir) {
-		sprintf(dst_path, "%s/ib_logfile0", xtrabackup_target_dir);
-		sprintf(src_path, "%s/%s", xtrabackup_target_dir,
-			XB_LOG_FILENAME);
-	} else {
-		sprintf(dst_path, "%s/ib_logfile0", xtrabackup_incremental_dir);
-		sprintf(src_path, "%s/%s", xtrabackup_incremental_dir,
-			XB_LOG_FILENAME);
-	}
-
-	os_normalize_path(dst_path);
-	os_normalize_path(src_path);
-
-	/* fake InnoDB */
-	srv_log_group_home_dir_save = srv_log_group_home_dir;
-
-	srv_log_group_home_dir = NULL;
-
-	srv_thread_concurrency = 1;
-
-	/* rename 'xtrabackup_logfile' to 'ib_logfile0' */
-	if (os_file_rename(0, src_path, dst_path)) {
-		xtrabackup_logfile_is_renamed = TRUE;
-		return(false);
-	}
-error:
-	msg("xtrabackup: Error: xtrabackup_init_temp_log() failed.\n");
-	return(true); /*ERROR*/
-}
 
 /***********************************************************************
 Generates path to the meta file path from a given path to an incremental .delta
@@ -4785,41 +4738,6 @@ xtrabackup_apply_deltas()
 		xtrabackup_apply_delta, NULL);
 }
 
-static bool
-xtrabackup_close_temp_log()
-{
-	char	src_path[FN_REFLEN];
-	char	dst_path[FN_REFLEN];
-
-	if (!xtrabackup_logfile_is_renamed)
-		return(false);
-
-	/* rename 'ib_logfile0' to 'xtrabackup_logfile' */
-	if(!xtrabackup_incremental_dir) {
-		sprintf(dst_path, "%s/ib_logfile0", xtrabackup_target_dir);
-		sprintf(src_path, "%s/%s", xtrabackup_target_dir,
-			XB_LOG_FILENAME);
-	} else {
-		sprintf(dst_path, "%s/ib_logfile0", xtrabackup_incremental_dir);
-		sprintf(src_path, "%s/%s", xtrabackup_incremental_dir,
-			XB_LOG_FILENAME);
-	}
-
-	os_normalize_path(dst_path);
-	os_normalize_path(src_path);
-
-	if (!os_file_rename(0, dst_path, src_path)) {
-		msg("xtrabackup: Error: xtrabackup_close_temp_log() failed.\n");
-		return(true);
-	}
-	xtrabackup_logfile_is_renamed = FALSE;
-
-	srv_log_group_home_dir = srv_log_group_home_dir_save;
-
-	return(false);
-}
-
-
 /*********************************************************************//**
 Write the meta data (index user fields) config file.
 @return true in case of success otherwise false. */
@@ -5260,7 +5178,10 @@ skip_check:
 		exit(EXIT_FAILURE);
 	}
 
-	/* Create logfiles for recovery from 'xtrabackup_logfile', before start InnoDB */
+	if (!xb_init_log_block_size()) {
+		exit(EXIT_FAILURE);
+	}
+
 	srv_max_n_threads = 1000;
 	srv_n_purge_threads = 1;
 	/* temporally dummy value to avoid crash */
@@ -5278,16 +5199,15 @@ skip_check:
 
 	xb_filters_init();
 
-	if (xtrabackup_init_temp_log()) {
+	char *srv_log_group_home_dir_save = srv_log_group_home_dir;
+	srv_log_group_home_dir = NULL;
+	srv_thread_concurrency = 1;
+
+	if (innodb_init_param()) {
 error_cleanup:
-		xtrabackup_close_temp_log();
 		xb_filters_free();
 error:
 		exit(EXIT_FAILURE);
-	}
-
-	if(innodb_init_param()) {
-		goto error_cleanup;
 	}
 
 	xb_normalize_init_values();
@@ -5633,8 +5553,7 @@ next_node:
 	sync_check_init();
 	ut_d(sync_check_enable());
 
-	if (xtrabackup_close_temp_log())
-		exit(EXIT_FAILURE);
+	srv_log_group_home_dir = srv_log_group_home_dir_save;
 
 	/* output to metadata file */
 	{

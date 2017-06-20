@@ -225,8 +225,7 @@ static struct my_option ibx_long_options[] =
 	 GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 
 	{"apply-log", OPT_APPLY_LOG, "Prepare a backup in BACKUP-DIR by "
-	"applying the transaction log file named \"xtrabackup_logfile\" "
-	"located in the same directory. Also, create new transaction logs. "
+	"applying the redo log 'ib_logfile0' and creating new redo log. "
 	"The InnoDB configuration is read from the file \"backup-my.cnf\".",
 	(uchar*) &opt_ibx_apply_log, (uchar*) &opt_ibx_apply_log,
 	0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
@@ -709,7 +708,7 @@ process.\n\
 \n\
 The --apply-log command prepares a backup for starting a MySQL\n\
 server on the backup. This command recovers InnoDB data files as specified\n\
-in BACKUP-DIR/backup-my.cnf using BACKUP-DIR/xtrabackup_logfile,\n\
+in BACKUP-DIR/backup-my.cnf using BACKUP-DIR/ib_logfile0,\n\
 and creates new InnoDB log files as specified in BACKUP-DIR/backup-my.cnf.\n\
 The BACKUP-DIR should be the path to a backup directory created by\n\
 xtrabackup. This command runs xtrabackup as a child process, but it does not \n\
