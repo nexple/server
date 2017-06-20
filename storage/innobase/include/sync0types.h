@@ -1077,6 +1077,7 @@ struct latch_t {
 /** Subclass this to iterate over a thread's acquired latch levels. */
 struct sync_check_functor_t {
 	virtual bool operator()(const latch_level_t) const = 0;
+        virtual ~sync_check_functor_t() {}
 };
 
 /** Check that no latch is being held.
