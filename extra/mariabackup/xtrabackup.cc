@@ -3876,15 +3876,26 @@ reread_log_header:
 	log_block_set_checksum(log_hdr,
 			       log_block_calc_checksum_crc32(log_hdr));
 
-	/* Write the log header, checkpoint page 1, and two
-	empty log pages before the payload. */
-	if (ds_write(dst_log_file, log_hdr, sizeof log_hdr)
-	    || ds_write(dst_log_file, buf, OS_FILE_LOG_BLOCK_SIZE)
+	/* Write the log header. */
+	if (ds_write(dst_log_file, log_hdr, sizeof log_hdr)) {
+	log_write_fail:
+		msg("xtrabackup: error: write to logfile failed\n");
+		goto fail;
+	}
+	/* Adjust the checkpoint page. */
+	memcpy(log_hdr, buf, OS_FILE_LOG_BLOCK_SIZE);
+	mach_write_to_8(log_hdr + LOG_CHECKPOINT_OFFSET,
+			(checkpoint_lsn_start & (OS_FILE_LOG_BLOCK_SIZE - 1))
+			| LOG_FILE_HDR_SIZE);
+	log_block_set_checksum(log_hdr,
+			       log_block_calc_checksum_crc32(log_hdr));
+	/* Write checkpoint page 1 and two empty log pages before the
+	payload. */
+	if (ds_write(dst_log_file, log_hdr, OS_FILE_LOG_BLOCK_SIZE)
 	    || !memset(log_hdr, 0, sizeof log_hdr)
 	    || ds_write(dst_log_file, log_hdr, sizeof log_hdr)
 	    || ds_write(dst_log_file, log_hdr, sizeof log_hdr)) {
-		msg("xtrabackup: error: write to logfile failed\n");
-		goto fail;
+		goto log_write_fail;
 	}
 
 	/* start flag */
