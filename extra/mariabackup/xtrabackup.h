@@ -94,9 +94,7 @@ extern "C"{
 }
 #endif
 extern my_bool		xtrabackup_export;
-extern char		*xtrabackup_incremental_basedir;
 extern char		*xtrabackup_extra_lsndir;
-extern char		*xtrabackup_incremental_dir;
 extern ulint		xtrabackup_log_copy_interval;
 extern char		*xtrabackup_stream_str;
 extern long		xtrabackup_throttle;
