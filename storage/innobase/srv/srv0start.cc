@@ -2573,7 +2573,7 @@ files_checked:
 		return(srv_init_abort(err));
 	}
 
-	if (!srv_read_only_mode) {
+	if (!srv_read_only_mode && srv_operation == SRV_OPERATION_NORMAL) {
 		/* Initialize the innodb_temporary tablespace and keep
 		it open until shutdown. */
 		err = srv_open_tmp_tablespace(create_new_db);
