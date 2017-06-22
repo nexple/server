@@ -5412,7 +5412,8 @@ next_node:
 	/* Check whether the log is applied enough or not. */
 	const lsn_t target_lsn = xtrabackup_incremental
 		? incremental_to_lsn : metadata_to_lsn;
-	if (srv_start_lsn < target_lsn) {
+	if ((srv_start_lsn || fil_space_get(SRV_LOG_SPACE_FIRST_ID))
+	    && srv_start_lsn < target_lsn) {
 		msg("xtrabackup: error: "
 		    "The log was only applied up to LSN " LSN_PF
 		    ", instead of " LSN_PF "\n",

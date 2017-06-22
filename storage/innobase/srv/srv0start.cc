@@ -1990,6 +1990,10 @@ innobase_start_or_create_for_mysql()
 
 			if (err == DB_NOT_FOUND) {
 				if (i == 0) {
+					if (srv_operation
+					    == SRV_OPERATION_RESTORE) {
+						return(DB_SUCCESS);
+					}
 					if (flushed_lsn
 					    < static_cast<lsn_t>(1000)) {
 						ib::error()
