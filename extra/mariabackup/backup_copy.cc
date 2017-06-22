@@ -1627,8 +1627,6 @@ apply_log_finish()
 bool
 copy_back()
 {
-	char *innobase_data_file_path_copy;
-	ulint i;
 	bool ret;
 	datadir_iter_t *it = NULL;
 	datadir_node_t node;
@@ -1671,7 +1669,6 @@ copy_back()
 	if (!innobase_data_file_path) {
   		innobase_data_file_path = (char*) "ibdata1:10M:autoextend";
 	}
-	innobase_data_file_path_copy = strdup(innobase_data_file_path);
 
 	srv_sys_space.set_path(".");
 
@@ -1681,9 +1678,6 @@ copy_back()
 	}
 
 	srv_max_n_threads = 1000;
-	/* temporally dummy value to avoid crash */
-	srv_page_size_shift = 14;
-	srv_page_size = (1 << srv_page_size_shift);
 	sync_check_init();
 	ut_crc32_init();
 
@@ -1695,9 +1689,9 @@ copy_back()
 
 		ds_data = ds_create(dst_dir, DS_TYPE_LOCAL);
 
-		for (i = 1; i <= srv_undo_tablespaces; i++) {
+		for (ulong i = 1; i <= srv_undo_tablespaces; i++) {
 			char filename[20];
-			sprintf(filename, "undo%03u", (uint)i);
+			sprintf(filename, "undo%03lu", i);
 			if (!(ret = copy_or_move_file(filename, filename,
 				                      dst_dir, 1))) {
 				goto cleanup;
@@ -1715,9 +1709,9 @@ copy_back()
 
 	ds_data = ds_create(dst_dir, DS_TYPE_LOCAL);
 
-	for (i = 0; i < srv_n_log_files; i++) {
+	for (uint i = 0; i <= SRV_N_LOG_FILES_MAX + 1; i++) {
 		char filename[20];
-		sprintf(filename, "ib_logfile%lu", i);
+		sprintf(filename, "ib_logfile%u", i);
 
 		if (!file_exists(filename)) {
 			continue;
@@ -1762,7 +1756,7 @@ copy_back()
 	datadir_node_init(&node);
 
 	while (datadir_iter_next(it, &node)) {
-		const char *ext_list[] = {"backup-my.cnf", "ib_logfile0",
+		const char *ext_list[] = {"backup-my.cnf",
 			"xtrabackup_binary", "xtrabackup_binlog_info",
 			"xtrabackup_checkpoints", ".qp", ".pmap", ".tmp",
 			NULL};
@@ -1860,8 +1854,6 @@ cleanup:
 	}
 
 	datadir_node_free(&node);
-
-	free(innobase_data_file_path_copy);
 
 	if (ds_data != NULL) {
 		ds_destroy(ds_data);
