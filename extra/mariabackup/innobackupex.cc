@@ -69,7 +69,6 @@ using std::max;
 my_bool opt_ibx_version = FALSE;
 my_bool opt_ibx_help = FALSE;
 my_bool opt_ibx_apply_log = FALSE;
-my_bool opt_ibx_redo_only = FALSE;
 my_bool opt_ibx_incremental = FALSE;
 my_bool opt_ibx_notimestamp = FALSE;
 
@@ -229,15 +228,6 @@ static struct my_option ibx_long_options[] =
 	"The InnoDB configuration is read from the file \"backup-my.cnf\".",
 	(uchar*) &opt_ibx_apply_log, (uchar*) &opt_ibx_apply_log,
 	0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-
-	{"redo-only", OPT_REDO_ONLY, "This option should be used when "
-	 "preparing the base full backup and when merging all incrementals "
-	 "except the last one. This forces xtrabackup to skip the \"rollback\" "
-	 "phase and do a \"redo\" only. This is necessary if the backup will "
-	 "have incremental changes applied to it later. See the xtrabackup "
-	 "documentation for details.",
-	 (uchar *) &opt_ibx_redo_only, (uchar *) &opt_ibx_redo_only, 0,
-	 GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 
 	{"copy-back", OPT_COPY_BACK, "Copy all the files in a previously made "
 	 "backup from the backup directory to their original locations.",
@@ -680,7 +670,7 @@ innobackupex [--compress] [--compress-threads=NUMBER-OF-THREADS] [--compress-chu
 \n\
 innobackupex --apply-log [--use-memory=B]\n\
              [--defaults-file=MY.CNF]\n\
-             [--export] [--redo-only] [--ibbackup=IBBACKUP-BINARY]\n\
+             [--export] [--ibbackup=IBBACKUP-BINARY]\n\
              BACKUP-DIR\n\
 \n\
 innobackupex --copy-back [--defaults-file=MY.CNF] [--defaults-group=GROUP-NAME] BACKUP-DIR\n\
@@ -978,9 +968,6 @@ ibx_init()
 	switch (ibx_mode) {
 	case IBX_MODE_APPLY_LOG:
 		xtrabackup_prepare = TRUE;
-		if (opt_ibx_redo_only) {
-			xtrabackup_apply_log_only = TRUE;
-		}
 		xtrabackup_target_dir = ibx_position_arg;
 		run = "apply-log";
 		break;

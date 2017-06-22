@@ -121,8 +121,7 @@ my_bool xtrabackup_move_back = FALSE;
 my_bool xtrabackup_decrypt_decompress = FALSE;
 my_bool xtrabackup_print_param = FALSE;
 
-my_bool xtrabackup_export = FALSE;
-my_bool xtrabackup_apply_log_only;
+my_bool xtrabackup_export;
 
 longlong xtrabackup_use_memory = 100*1024*1024L;
 my_bool xtrabackup_create_ib_logfile = FALSE;
@@ -205,8 +204,7 @@ char*	log_ignored_opt				= NULL;
 
 /* === metadata of backup === */
 #define XTRABACKUP_METADATA_FILENAME "xtrabackup_checkpoints"
-char metadata_type[30] = ""; /*[full-backuped|log-applied|
-			     full-prepared|incremental]*/
+char metadata_type[30] = ""; /*[full-backuped|log-applied|incremental]*/
 lsn_t metadata_from_lsn = 0;
 lsn_t metadata_to_lsn = 0;
 lsn_t metadata_last_lsn = 0;
@@ -461,7 +459,6 @@ enum options_xtrabackup
   OPT_XTRA_BACKUP,
   OPT_XTRA_PREPARE,
   OPT_XTRA_EXPORT,
-  OPT_XTRA_APPLY_LOG_ONLY,
   OPT_XTRA_PRINT_PARAM,
   OPT_XTRA_USE_MEMORY,
   OPT_XTRA_THROTTLE,
@@ -577,10 +574,6 @@ struct my_option xb_client_options[] =
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"export", OPT_XTRA_EXPORT, "create files to import to another database when prepare.",
    (G_PTR*) &xtrabackup_export, (G_PTR*) &xtrabackup_export,
-   0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-  {"apply-log-only", OPT_XTRA_APPLY_LOG_ONLY,
-   "do not process undo log after applying redo log in prepare.",
-   (G_PTR*) &xtrabackup_apply_log_only, (G_PTR*) &xtrabackup_apply_log_only,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"print-param", OPT_XTRA_PRINT_PARAM, "print parameter of mysqld needed for copyback.",
    (G_PTR*) &xtrabackup_print_param, (G_PTR*) &xtrabackup_print_param,
@@ -5153,25 +5146,19 @@ xtrabackup_prepare_func(int argc, char ** argv)
 	}
 
 	if (!strcmp(metadata_type, "full-backuped")) {
+		if (xtrabackup_incremental) {
+			msg("xtrabackup: error: applying incremental backup "
+			    "needs a prepared target.\n");
+			return(false);
+		}
 		msg("xtrabackup: This target seems to be not prepared yet.\n");
 	} else if (!strcmp(metadata_type, "log-applied")) {
-		msg("xtrabackup: This target seems to be already "
-		    "prepared with --apply-log-only.\n");
-		goto skip_check;
-	} else if (!strcmp(metadata_type, "full-prepared")) {
 		msg("xtrabackup: This target seems to be already prepared.\n");
 	} else {
-		msg("xtrabackup: This target seems not to have correct "
-		    "metadata...\n");
+		msg("xtrabackup: This target does not have correct metadata.\n");
 		return(false);
 	}
 
-	if (xtrabackup_incremental) {
-		msg("xtrabackup: error: applying incremental backup "
-		    "needs target prepared with --apply-log-only.\n");
-		return(false);
-	}
-skip_check:
 	if (xtrabackup_incremental
 	    && metadata_to_lsn != incremental_lsn) {
 		msg("xtrabackup: error: This incremental backup seems "
@@ -5250,12 +5237,6 @@ error_cleanup:
 		goto error_cleanup;
 	}
 
-	if (xtrabackup_apply_log_only
-	    && srv_force_recovery < SRV_FORCE_NO_TRX_UNDO) {
-		/* FIXME: split into flags (do not ignore corrupted pages!) */
-		srv_force_recovery = SRV_FORCE_NO_TRX_UNDO;
-	}
-
 	/* increase IO threads */
 	if(srv_n_file_io_threads < 10) {
 		srv_n_read_io_threads = 4;
@@ -5313,10 +5294,15 @@ error_cleanup:
 		mutex_exit(&fil_system->mutex);
 	}
 
-	/* merge the change buffer and complete the purge at shutdwon */
-	srv_fast_shutdown = !xtrabackup_export;
-
 	if (xtrabackup_export) {
+#if 1 // FIXME: remove the option or fix the logic
+		/* In MariaDB 10.2, undo log processing would need the
+		ability to evaluate indexed virtual columns, and we
+		have not initialized the necessary infrastructure. */
+		msg("xtrabackup: --export does not work!\n");
+		ok = false;
+	} else if (xtrabackup_export) {
+#endif
 		msg("xtrabackup: export option is specified.\n");
 		pfs_os_file_t	info_file;
 		char		info_file_path[FN_REFLEN];
@@ -5525,8 +5511,7 @@ next_node:
 	if (ok) {
 		char	filename[FN_REFLEN];
 
-		strcpy(metadata_type, xtrabackup_apply_log_only ?
-					"log-applied" : "full-prepared");
+		strcpy(metadata_type, "log-applied");
 
 		if(xtrabackup_incremental
 		   && metadata_to_lsn < incremental_to_lsn)

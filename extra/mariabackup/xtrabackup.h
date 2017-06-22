@@ -72,7 +72,6 @@ extern ibool		xtrabackup_compress;
 
 extern my_bool		xtrabackup_backup;
 extern my_bool		xtrabackup_prepare;
-extern my_bool		xtrabackup_apply_log_only;
 extern my_bool		xtrabackup_copy_back;
 extern my_bool		xtrabackup_move_back;
 extern my_bool		xtrabackup_decrypt_decompress;
