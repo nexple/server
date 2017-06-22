@@ -3984,7 +3984,7 @@ reread_log_header:
 		os_event_destroy(wait_throttle);
 	}
 
-	msg("xtrabackup: Transaction log of lsn (" LSN_PF ") to (" LSN_PF
+	msg("xtrabackup: Redo log (from LSN " LSN_PF " to " LSN_PF
 	    ") was copied.\n", checkpoint_lsn_start, log_copy_scanned_lsn);
 	xb_filters_free();
 
