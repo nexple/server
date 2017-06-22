@@ -1702,29 +1702,18 @@ copy_back()
 		ds_data = NULL;
 	}
 
-	/* copy redo logs */
-
+	/* --prepare does not leave any redo log. We must delete any
+	redo logs at the destination, so that the database will not rewind
+	to an older log sequence number (LSN). */
 	dst_dir = (srv_log_group_home_dir && *srv_log_group_home_dir)
-				? srv_log_group_home_dir : mysql_data_home;
-
-	ds_data = ds_create(dst_dir, DS_TYPE_LOCAL);
+		? srv_log_group_home_dir : mysql_data_home;
 
 	for (uint i = 0; i <= SRV_N_LOG_FILES_MAX + 1; i++) {
-		char filename[20];
-		sprintf(filename, "ib_logfile%u", i);
-
-		if (!file_exists(filename)) {
-			continue;
-		}
-
-		if (!(ret = copy_or_move_file(filename, filename,
-					      dst_dir, 1))) {
-			goto cleanup;
-		}
+		char filename[FN_REFLEN];
+		snprintf(filename, sizeof filename, "%s/ib_logfile%u",
+			 dst_dir, i);
+		unlink(filename);
 	}
-
-	ds_destroy(ds_data);
-	ds_data = NULL;
 
 	/* copy innodb system tablespace(s) */
 
@@ -1799,11 +1788,6 @@ copy_back()
 
 		/* skip undo tablespaces */
 		if (sscanf(filename, "undo%d%c", &i_tmp, &c_tmp) == 1) {
-			continue;
-		}
-
-		/* skip redo logs */
-		if (sscanf(filename, "ib_logfile%d%c", &i_tmp, &c_tmp) == 1) {
 			continue;
 		}
 

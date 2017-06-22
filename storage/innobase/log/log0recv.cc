@@ -1930,27 +1930,29 @@ recv_read_in_area(
 void
 recv_apply_hashed_log_recs(bool last_batch)
 {
-	for (;;) {
-		mutex_enter(&recv_sys->mutex);
+	ut_ad(srv_operation == SRV_OPERATION_NORMAL
+	      || srv_operation == SRV_OPERATION_RESTORE);
 
-		if (!recv_sys->apply_batch_on) {
-			break;
-		}
+	mutex_enter(&recv_sys->mutex);
 
-		if (recv_sys->found_corrupt_log) {
-			mutex_exit(&recv_sys->mutex);
+	while (recv_sys->apply_batch_on) {
+		bool abort = recv_sys->found_corrupt_log;
+		mutex_exit(&recv_sys->mutex);
+
+		if (abort) {
 			return;
 		}
 
-		mutex_exit(&recv_sys->mutex);
 		os_thread_sleep(500000);
+		mutex_enter(&recv_sys->mutex);
 	}
 
 	ut_ad(!last_batch == log_mutex_own());
 
-	if (!last_batch) {
-		recv_no_ibuf_operations = true;
-	}
+	recv_no_ibuf_operations = !last_batch
+		|| srv_operation == SRV_OPERATION_RESTORE;
+
+	ut_d(recv_no_log_write = recv_no_ibuf_operations);
 
 	if (ulint n = recv_sys->n_addrs) {
 		const char* msg = last_batch
@@ -2022,10 +2024,11 @@ recv_apply_hashed_log_recs(bool last_batch)
 	/* Wait until all the pages have been processed */
 
 	while (recv_sys->n_addrs != 0) {
+		bool abort = recv_sys->found_corrupt_log;
 
 		mutex_exit(&(recv_sys->mutex));
 
-		if (recv_sys->found_corrupt_log) {
+		if (abort) {
 			return;
 		}
 
@@ -2038,7 +2041,6 @@ recv_apply_hashed_log_recs(bool last_batch)
 		/* Flush all the file pages to disk and invalidate them in
 		the buffer pool */
 
-		ut_d(recv_no_log_write = true);
 		mutex_exit(&(recv_sys->mutex));
 		log_mutex_exit();
 
@@ -2061,9 +2063,6 @@ recv_apply_hashed_log_recs(bool last_batch)
 
 		log_mutex_enter();
 		mutex_enter(&(recv_sys->mutex));
-		ut_d(recv_no_log_write = false);
-
-		recv_no_ibuf_operations = false;
 	}
 
 	recv_sys->apply_log_recs = FALSE;

@@ -229,13 +229,10 @@ long innobase_buffer_pool_awe_mem_mb = 0;
 long innobase_file_io_threads = 4;
 long innobase_read_io_threads = 4;
 long innobase_write_io_threads = 4;
-long innobase_force_recovery = 0;
 long innobase_log_buffer_size = 1024*1024L;
 long innobase_open_files = 300L;
 
 longlong innobase_page_size = (1LL << 14); /* 16KB */
-static ulong innobase_log_block_size = 512;
-char*	innobase_doublewrite_file = NULL;
 char*	innobase_buffer_pool_filename = NULL;
 
 longlong innobase_buffer_pool_size = 8*1024*1024L;
@@ -499,10 +496,7 @@ enum options_xtrabackup
   OPT_INNODB_WRITE_IO_THREADS,
   OPT_INNODB_USE_NATIVE_AIO,
   OPT_INNODB_PAGE_SIZE,
-  OPT_INNODB_LOG_BLOCK_SIZE,
-  OPT_INNODB_DOUBLEWRITE_FILE,
   OPT_INNODB_BUFFER_POOL_FILENAME,
-  OPT_INNODB_FORCE_RECOVERY,
   OPT_INNODB_LOCK_WAIT_TIMEOUT,
   OPT_INNODB_LOG_BUFFER_SIZE,
   OPT_INNODB_LOG_FILE_SIZE,
@@ -982,23 +976,17 @@ Disable with --skip-innodb-doublewrite.", (G_PTR*) &innobase_use_doublewrite,
    (G_PTR*) &innobase_unix_file_flush_method, 0, GET_STR, REQUIRED_ARG, 0, 0, 0,
    0, 0, 0},
 
-/* ####### Should we use this option? ####### */
-  {"innodb_force_recovery", OPT_INNODB_FORCE_RECOVERY,
-   "Helps to save your data in case the disk image of the database becomes corrupt.",
-   (G_PTR*) &innobase_force_recovery, (G_PTR*) &innobase_force_recovery, 0,
-   GET_LONG, REQUIRED_ARG, 0, 0, 6, 0, 1, 0},
-
   {"innodb_log_buffer_size", OPT_INNODB_LOG_BUFFER_SIZE,
    "The size of the buffer which InnoDB uses to write log to the log files on disk.",
    (G_PTR*) &innobase_log_buffer_size, (G_PTR*) &innobase_log_buffer_size, 0,
    GET_LONG, REQUIRED_ARG, 1024*1024L, 256*1024L, LONG_MAX, 0, 1024, 0},
   {"innodb_log_file_size", OPT_INNODB_LOG_FILE_SIZE,
-   "Size of each log file in a log group.",
+   "Ignored for mysqld option compatibility",
    (G_PTR*) &srv_log_file_size, (G_PTR*) &srv_log_file_size, 0,
    GET_ULL, REQUIRED_ARG, 48 << 20, 1 << 20, 512ULL << 30, 0,
    UNIV_PAGE_SIZE_MAX, 0},
   {"innodb_log_files_in_group", OPT_INNODB_LOG_FILES_IN_GROUP,
-   "Number of redo log files",
+   "Ignored for mysqld option compatibility",
    &srv_n_log_files, &srv_n_log_files,
    0, GET_LONG, REQUIRED_ARG, 1, 1, 100, 0, 1, 0},
   {"innodb_log_group_home_dir", OPT_INNODB_LOG_GROUP_HOME_DIR,
@@ -1022,17 +1010,8 @@ Disable with --skip-innodb-doublewrite.", (G_PTR*) &innobase_use_doublewrite,
    /* Use GET_LL to support numeric suffixes in 5.6 */
    GET_LL, REQUIRED_ARG,
    (1LL << 14), (1LL << 12), (1LL << UNIV_PAGE_SIZE_SHIFT_MAX), 0, 1L, 0},
-  {"innodb_log_block_size", OPT_INNODB_LOG_BLOCK_SIZE,
-  "The log block size of the transaction log file. "
-   "Changing for created log file is not supported. Use on your own risk!",
-   (G_PTR*) &innobase_log_block_size, (G_PTR*) &innobase_log_block_size, 0,
-   GET_ULONG, REQUIRED_ARG, 512, 512, 1 << UNIV_PAGE_SIZE_SHIFT_MAX, 0, 1L, 0},
-  {"innodb_doublewrite_file", OPT_INNODB_DOUBLEWRITE_FILE,
-   "Path to special datafile for doublewrite buffer. (default is "": not used)",
-   (G_PTR*) &innobase_doublewrite_file, (G_PTR*) &innobase_doublewrite_file,
-   0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"innodb_buffer_pool_filename", OPT_INNODB_BUFFER_POOL_FILENAME,
-   "Filename to/from which to dump/load the InnoDB buffer pool",
+   "Ignored for mysqld option compatibility",
    (G_PTR*) &innobase_buffer_pool_filename,
    (G_PTR*) &innobase_buffer_pool_filename,
    0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
@@ -1235,13 +1214,7 @@ xb_get_one_option(int optid,
     break;
 
   case OPT_INNODB_LOG_FILES_IN_GROUP:
-
-    ADD_PRINT_PARAM_OPT(srv_n_log_files);
-    break;
-
   case OPT_INNODB_LOG_FILE_SIZE:
-
-    ADD_PRINT_PARAM_OPT(srv_log_file_size);
     break;
 
   case OPT_INNODB_FLUSH_METHOD:
@@ -1252,16 +1225,6 @@ xb_get_one_option(int optid,
   case OPT_INNODB_PAGE_SIZE:
 
     ADD_PRINT_PARAM_OPT(innobase_page_size);
-    break;
-
-  case OPT_INNODB_LOG_BLOCK_SIZE:
-
-    ADD_PRINT_PARAM_OPT(innobase_log_block_size);
-    break;
-
-  case OPT_INNODB_DOUBLEWRITE_FILE:
-
-    ADD_PRINT_PARAM_OPT(innobase_doublewrite_file);
     break;
 
   case OPT_INNODB_UNDO_DIRECTORY:
@@ -1353,33 +1316,6 @@ xb_get_one_option(int optid,
   return 0;
 }
 
-/***********************************************************************
-Initializes log_block_size */
-static
-ibool
-xb_init_log_block_size(void)
-{
-	srv_log_write_ahead_size = 0;
-	if (innobase_log_block_size != 512) {
-		uint	n_shift = (uint)get_bit_shift(innobase_log_block_size);;
-
-		if (n_shift > 0) {
-			srv_log_write_ahead_size = (ulint)(1LL << n_shift);
-			msg("InnoDB: The log block size is set to %lu.\n",
-			    srv_log_write_ahead_size);
-		}
-	} else {
-		srv_log_write_ahead_size = 512;
-	}
-	if (!srv_log_write_ahead_size) {
-		msg("InnoDB: Error: %lu is not valid value for "
-		    "innodb_log_block_size.\n", innobase_log_block_size);
-		return FALSE;
-	}
-
-	return TRUE;
-}
-
 static my_bool
 innodb_init_param(void)
 {
@@ -1412,10 +1348,6 @@ innodb_init_param(void)
 	} else {
 		srv_page_size_shift = 14;
 		srv_page_size = (1 << srv_page_size_shift);
-	}
-
-	if (!xb_init_log_block_size()) {
-		goto error;
 	}
 
 	/* Check that values don't overflow on 32-bit systems. */
@@ -1523,10 +1455,6 @@ innodb_init_param(void)
 
 	srv_file_flush_method_str = innobase_unix_file_flush_method;
 
-	msg("xtrabackup:   innodb_log_files_in_group = %ld\n",
-	    srv_n_log_files);
-	msg("xtrabackup:   innodb_log_file_size = %llu\n", srv_log_file_size);
-
 	srv_log_buffer_size = (ulint) innobase_log_buffer_size;
 
         /* We set srv_pool_size here in units of 1 kB. InnoDB internally
@@ -1539,8 +1467,6 @@ innodb_init_param(void)
 	srv_n_file_io_threads = (ulint) innobase_file_io_threads;
 	srv_n_read_io_threads = (ulint) innobase_read_io_threads;
 	srv_n_write_io_threads = (ulint) innobase_write_io_threads;
-
-	srv_force_recovery = (ulint) innobase_force_recovery;
 
 	srv_use_doublewrite_buf = (ibool) innobase_use_doublewrite;
 
@@ -5156,18 +5082,13 @@ xtrabackup_prepare_func(int argc, char ** argv)
 		return(false);
 	}
 
-	if (xtrabackup_incremental
-	    && metadata_to_lsn != incremental_lsn) {
+	bool ok = !xtrabackup_incremental
+		|| metadata_to_lsn == incremental_lsn;
+	if (!ok) {
 		msg("xtrabackup: error: This incremental backup seems "
 		    "not to be proper for the target.\n"
 		    "xtrabackup:  Check 'to_lsn' of the target and "
 		    "'from_lsn' of the incremental.\n");
-		return(false);
-	}
-
-	bool	ok = xb_init_log_block_size();
-
-	if (!ok) {
 		return(false);
 	}
 
@@ -5502,8 +5423,6 @@ next_node:
 	else if (ok) xb_write_galera_info(xtrabackup_incremental);
 #endif
 
-	msg("xtrabackup: starting shutdown with innodb_fast_shutdown = %u\n",
-	    srv_fast_shutdown);
 	innodb_end();
 	innodb_free_param();
 

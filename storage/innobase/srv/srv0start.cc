@@ -395,6 +395,29 @@ create_log_file(
 /** Initial number of the first redo log file */
 #define INIT_LOG_FILE0	(SRV_N_LOG_FILES_MAX + 1)
 
+/** Delete all log files.
+@param[in,out]	logfilename	buffer for log file name
+@param[in]	dirnamelen	length of the directory path
+@param[in]	n_files		number of files to delete */
+static
+void
+delete_log_files(char* logfilename, size_t dirnamelen, unsigned n_files)
+{
+	/* Remove any old log files. */
+	for (unsigned i = 0; i < n_files; i++) {
+		sprintf(logfilename + dirnamelen, "ib_logfile%u", i);
+
+		/* Ignore errors about non-existent files or files
+		that cannot be removed. The create_log_file() will
+		return an error when the file exists. */
+#ifdef _WIN32
+		DeleteFile((LPCTSTR) logfilename);
+#else
+		unlink(logfilename);
+#endif
+	}
+}
+
 /*********************************************************************//**
 Creates all log files.
 @return DB_SUCCESS or error code */
@@ -414,24 +437,14 @@ create_log_files(
 		return(DB_READ_ONLY);
 	}
 
-	/* Remove any old log files. */
-	for (unsigned i = 0; i <= INIT_LOG_FILE0; i++) {
-		sprintf(logfilename + dirnamelen, "ib_logfile%u", i);
+	/* Crashing after deleting the first file should be
+	recoverable. The buffer pool was clean, and we can simply
+	create all log files from the scratch. */
+	DBUG_EXECUTE_IF("innodb_log_abort_6",
+			delete_log_files(logfilename, dirnamelen, 1);
+			return(DB_ERROR););
 
-		/* Ignore errors about non-existent files or files
-		that cannot be removed. The create_log_file() will
-		return an error when the file exists. */
-#ifdef _WIN32
-		DeleteFile((LPCTSTR) logfilename);
-#else
-		unlink(logfilename);
-#endif
-		/* Crashing after deleting the first
-		file should be recoverable. The buffer
-		pool was clean, and we can simply create
-		all log files from the scratch. */
-		DBUG_EXECUTE_IF("innodb_log_abort_6", return(DB_ERROR););
-	}
+	delete_log_files(logfilename, dirnamelen, INIT_LOG_FILE0 + 1);
 
 	DBUG_PRINT("ib_log", ("After innodb_log_abort_6"));
 	ut_ad(!buf_pool_check_no_pending_io());
@@ -1475,7 +1488,8 @@ innobase_start_or_create_for_mysql()
 	size_t		dirnamelen;
 	unsigned	i = 0;
 
-	ut_ad(srv_operation == SRV_OPERATION_NORMAL || srv_operation == SRV_OPERATION_RESTORE);
+	ut_ad(srv_operation == SRV_OPERATION_NORMAL
+	      || srv_operation == SRV_OPERATION_RESTORE);
 
 	if (srv_force_recovery == SRV_FORCE_NO_LOG_REDO) {
 		srv_read_only_mode = true;
@@ -2322,6 +2336,26 @@ files_checked:
 
 		recv_recovery_from_checkpoint_finish();
 
+		if (srv_operation == SRV_OPERATION_RESTORE) {
+			/* After applying the redo log from
+			SRV_OPERATION_BACKUP, flush the changes
+			to the data files and delete the log file.
+			No further change to InnoDB files is needed. */
+			ut_ad(!srv_force_recovery);
+			ut_ad(srv_n_log_files_found <= 1);
+			ut_ad(recv_no_log_write);
+			buf_flush_sync_all_buf_pools();
+			err = fil_write_flushed_lsn(log_get_lsn());
+			ut_ad(!buf_pool_check_no_pending_io());
+			fil_close_log_files(true);
+			log_group_close_all();
+			if (err == DB_SUCCESS) {
+				delete_log_files(logfilename, dirnamelen,
+						 srv_n_log_files_found);
+			}
+			return(err);
+		}
+
 		/* Upgrade or resize or rebuild the redo logs before
 		generating any dirty pages, so that the old redo log
 		files will not be written to. */
@@ -2788,10 +2822,10 @@ innodb_shutdown()
 
 	switch (srv_operation) {
 	case SRV_OPERATION_BACKUP:
+	case SRV_OPERATION_RESTORE:
 		fil_close_all_files();
 		break;
 	case SRV_OPERATION_NORMAL:
-	case SRV_OPERATION_RESTORE:
 		/* Shut down the persistent files. */
 		logs_empty_and_mark_files_at_shutdown();
 
