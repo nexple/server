@@ -516,7 +516,7 @@ enum options_xtrabackup
   OPT_INNODB_CHECKSUM_ALGORITHM,
   OPT_INNODB_UNDO_DIRECTORY,
   OPT_INNODB_UNDO_TABLESPACES,
-  OPT_INNODB_LOG_CHECKSUM_ALGORITHM,
+  OPT_INNODB_LOG_CHECKSUMS,
   OPT_XTRA_INCREMENTAL_FORCE_SCAN,
   OPT_DEFAULTS_GROUP,
   OPT_OPEN_FILES_LIMIT,
@@ -1084,7 +1084,12 @@ Disable with --skip-innodb-doublewrite.", (G_PTR*) &innobase_use_doublewrite,
   { "innodb-encrypt-log", OPT_INNODB_ENCRYPT_LOG, "encrypton plugin to load",
   &srv_encrypt_log, &srv_encrypt_log,
   0, GET_BOOL, REQUIRED_ARG, 0, 0, 0, 0, 0, 0 },
-  
+
+  {"innodb-log-checksums", OPT_INNODB_LOG_CHECKSUMS,
+   "Whether to require checksums for InnoDB redo log blocks",
+   &innodb_log_checksums, &innodb_log_checksums,
+   0, GET_BOOL, REQUIRED_ARG, 1, 0, 0, 0, 0, 0 },
+
   {"open_files_limit", OPT_OPEN_FILES_LIMIT, "the maximum number of file "
    "descriptors to reserve with setrlimit().",
    (G_PTR*) &xb_open_files_limit, (G_PTR*) &xb_open_files_limit, 0, GET_ULONG,
@@ -5236,6 +5241,9 @@ error_cleanup:
 	if (innodb_init_param()) {
 		goto error_cleanup;
 	}
+	/* For compatibility with both values of --innodb-log-checksums,
+	unconditionally enable redo log checksums in --prepare. */
+	log_checksum_algorithm_ptr = log_block_calc_checksum_crc32;
 
 	/* increase IO threads */
 	if(srv_n_file_io_threads < 10) {
