@@ -891,15 +891,7 @@ srv_undo_tablespaces_init(bool create_new_db)
 	we build the undo_tablespace_ids ourselves since they don't
 	already exist. */
 
-	if (create_new_db || srv_operation == SRV_OPERATION_BACKUP) {
-		srv_undo_tablespaces_active = srv_undo_tablespaces;
-		n_undo_tablespaces = srv_undo_tablespaces;
-
-		if (n_undo_tablespaces != 0) {
-			srv_undo_space_id_start = undo_tablespace_ids[0];
-			prev_space_id = srv_undo_space_id_start - 1;
-		}
-	} else {
+	if (!create_new_db && srv_operation == SRV_OPERATION_NORMAL) {
 		n_undo_tablespaces = trx_rseg_get_n_undo_tablespaces(
 			undo_tablespace_ids);
 
@@ -936,6 +928,14 @@ srv_undo_tablespaces_init(bool create_new_db)
 				undo::Truncate::s_fix_up_spaces.push_back(
 					undo_tablespace_ids[i]);
 			}
+		}
+	} else {
+		srv_undo_tablespaces_active = srv_undo_tablespaces;
+		n_undo_tablespaces = srv_undo_tablespaces;
+
+		if (n_undo_tablespaces != 0) {
+			srv_undo_space_id_start = undo_tablespace_ids[0];
+			prev_space_id = srv_undo_space_id_start - 1;
 		}
 	}
 
