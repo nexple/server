@@ -346,9 +346,6 @@ const char *opt_history = NULL;
 
 #if defined(HAVE_OPENSSL)
 my_bool opt_ssl_verify_server_cert = FALSE;
-#if !defined(HAVE_YASSL)
-char *opt_server_public_key = NULL;
-#endif
 #endif
 
 /* Whether xtrabackup_binlog_info should be created on recovery */
@@ -503,7 +500,6 @@ enum options_xtrabackup
   OPT_INNODB_USE_NATIVE_AIO,
   OPT_INNODB_PAGE_SIZE,
   OPT_INNODB_LOG_BLOCK_SIZE,
-  OPT_INNODB_EXTRA_UNDOSLOTS,
   OPT_INNODB_DOUBLEWRITE_FILE,
   OPT_INNODB_BUFFER_POOL_FILENAME,
   OPT_INNODB_FORCE_RECOVERY,
@@ -550,10 +546,6 @@ enum options_xtrabackup
   OPT_SAFE_SLAVE_BACKUP_TIMEOUT,
   OPT_BINLOG_INFO,
   OPT_XB_SECURE_AUTH,
-
-  OPT_SSL_SSL,
-  OPT_SSL_VERIFY_SERVER_CERT,
-  OPT_SERVER_PUBLIC_KEY,
 
   OPT_XTRA_TABLES_EXCLUDE,
   OPT_XTRA_DATABASES_EXCLUDE,
@@ -612,7 +604,7 @@ struct my_option xb_client_options[] =
   {"databases", OPT_XTRA_DATABASES, "filtering by list of databases.",
    (G_PTR*) &xtrabackup_databases, (G_PTR*) &xtrabackup_databases,
    0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-  {"databases_file", OPT_XTRA_TABLES_FILE,
+  {"databases_file", OPT_XTRA_DATABASES_FILE,
    "filtering by list of databases in the file.",
    (G_PTR*) &xtrabackup_databases_file, (G_PTR*) &xtrabackup_databases_file,
    0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
