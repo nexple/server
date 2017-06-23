@@ -4131,7 +4131,7 @@ os_file_create_func(
 
 	DWORD		create_flag;
 	DWORD		share_mode = srv_operation == SRV_OPERATION_BACKUP
-		? FILE_SHARE_READ | FILE_SHARE_WRITE
+		? FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
 		: FILE_SHARE_READ;
 
 	if (create_mode != OS_FILE_OPEN && create_mode != OS_FILE_OPEN_RAW) {
@@ -4337,7 +4337,9 @@ os_file_create_simple_no_error_handling_func(
 	DWORD		access;
 	DWORD		create_flag;
 	DWORD		attributes	= 0;
-	DWORD		share_mode	= FILE_SHARE_READ;
+	DWORD		share_mode = srv_operation == SRV_OPERATION_BACKUP
+		? FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+		: FILE_SHARE_READ;
 
 	ut_a(name);
 
