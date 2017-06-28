@@ -4169,6 +4169,7 @@ xb_delta_open_matching_space(
 		return file;
 	}
 
+	log_mutex_enter();
 	if (!fil_is_user_tablespace_id(space_id)) {
 		goto found;
 	}
@@ -4272,6 +4273,7 @@ found:
 
 exit:
 
+	log_mutex_exit();
 	return file;
 }
 
@@ -5113,6 +5115,8 @@ error_cleanup:
 		ut_d(sync_check_enable());
 		ut_crc32_init();
 		recv_sys_init();
+		log_sys_init();
+		recv_recovery_on = true;
 
 #ifdef WITH_INNODB_DISALLOW_WRITES
 		srv_allow_writes_event = os_event_create(0);
@@ -5146,7 +5150,7 @@ error_cleanup:
 		os_event_destroy(srv_allow_writes_event);
 #endif
 		innodb_free_param();
-		recv_sys_close();
+		log_shutdown();
 		sync_check_close();
 		if (!ok) goto error_cleanup;
 	}
