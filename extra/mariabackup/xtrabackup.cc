@@ -2734,6 +2734,10 @@ xb_load_single_table_tablespace(
 
 	ut_free(name);
 
+	if (fil_space_crypt_t* crypt_info = file->get_crypt_info()) {
+		fil_space_destroy_crypt_data(&crypt_info);
+	}
+
 	delete file;
 
 	if (err != DB_SUCCESS && err != DB_CORRUPTION && xtrabackup_backup) {
