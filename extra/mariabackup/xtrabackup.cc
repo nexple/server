@@ -2039,9 +2039,7 @@ ulint xb_get_space_flags(pfs_os_file_t file)
 	buf = static_cast<byte *>(malloc(2 * UNIV_PAGE_SIZE));
 	page = static_cast<byte *>(ut_align(buf, UNIV_PAGE_SIZE));
 
-	IORequest request(IORequest::READ);
-
-	if (os_file_read(request, file, page, 0, UNIV_PAGE_SIZE)) {
+	if (os_file_read(IORequestRead, file, page, 0, UNIV_PAGE_SIZE)) {
 		flags = fsp_header_get_flags(page);
 	} else {
 		flags = ULINT_UNDEFINED;
@@ -3949,14 +3947,13 @@ xb_space_create_file(
 
 	fsp_header_init_fields(page, space_id, flags);
 	mach_write_to_4(page + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID, space_id);
-	IORequest request(IORequest::WRITE);
 
 	const page_size_t page_size(flags);
 
 	if (!page_size.is_compressed()) {
 		buf_flush_init_for_writing(NULL, page, NULL, 0, false);
 
-		ret = os_file_write(request, path, *file, page, 0,
+		ret = os_file_write(IORequestWrite, path, *file, page, 0,
 				    UNIV_PAGE_SIZE);
 	} else {
 		page_zip_des_t	page_zip;
@@ -3973,8 +3970,8 @@ xb_space_create_file(
 
 		buf_flush_init_for_writing(NULL, page, &page_zip, 0, false);
 
-		ret = os_file_write(request, path, *file, page_zip.data, 0,
-				    zip_size);
+		ret = os_file_write(IORequestWrite, path, *file,
+				    page_zip.data, 0, zip_size);
 	}
 
 	free(buf);
@@ -4262,15 +4259,14 @@ xtrabackup_apply_delta(
 	msg("Applying %s to %s...\n", src_path, dst_path);
 
 	while (!last_buffer) {
-		IORequest readReq(IORequest::READ);
 		ulint cluster_header;
 
 		/* read to buffer */
 		/* first block of block cluster */
 		offset = ((incremental_buffers * (page_size / 4))
 			 << page_size_shift);
-		success = os_file_read(readReq, src_file, incremental_buffer,
-				       offset, page_size);
+		success = os_file_read(IORequestRead, src_file,
+				       incremental_buffer, offset, page_size);
 		if (!success) {
 			goto error;
 		}
@@ -4298,7 +4294,8 @@ xtrabackup_apply_delta(
 		ut_a(last_buffer || page_in_buffer == page_size / 4);
 
 		/* read whole of the cluster */
-		success = os_file_read(readReq, src_file, incremental_buffer,
+		success = os_file_read(IORequestRead, src_file,
+				       incremental_buffer,
 				       offset, page_in_buffer * page_size);
 		if (!success) {
 			goto error;
@@ -4306,8 +4303,6 @@ xtrabackup_apply_delta(
 
 		posix_fadvise(src_file, offset, page_in_buffer * page_size,
 			      POSIX_FADV_DONTNEED);
-
-		IORequest request(IORequest::WRITE);
 
 		for (page_in_buffer = 1; page_in_buffer < page_size / 4;
 		     page_in_buffer++) {
@@ -4318,7 +4313,8 @@ xtrabackup_apply_delta(
 			if (offset_on_page == 0xFFFFFFFFUL)
 				break;
 
-			success = os_file_write(request, dst_path, dst_file,
+			success = os_file_write(IORequestWrite,
+						dst_path, dst_file,
 						incremental_buffer +
 						page_in_buffer * page_size,
 						(offset_on_page <<
@@ -5135,8 +5131,6 @@ error_cleanup:
 				continue;
 			}
 
-			IORequest request(IORequest::WRITE);
-
 			/* node exist == file exist, here */
 			strcpy(info_file_path, node->name);
 #ifdef _WIN32
@@ -5231,7 +5225,7 @@ error_cleanup:
 				os_file_get_last_error(TRUE);
 				goto next_node;
 			}
-			success = os_file_write(request, info_file_path,
+			success = os_file_write(IORequestWrite, info_file_path,
 						info_file, page,
 						0, UNIV_PAGE_SIZE);
 			if (!success) {

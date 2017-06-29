@@ -330,8 +330,8 @@ read_retry:
 		return(XB_FIL_CUR_ERROR);
 	}
 
-	IORequest request(IORequest::READ);
-	success = os_file_read(request ,cursor->file, cursor->buf, offset,
+	success = os_file_read(IORequestRead,
+			       cursor->file, cursor->buf, offset,
 			       (ulint) to_read);
 	if (!success) {
 		return(XB_FIL_CUR_ERROR);

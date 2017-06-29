@@ -533,16 +533,14 @@ datafile_read(datafile_cur_t *cursor)
 		return(XB_FIL_CUR_EOF);
 	}
 
-	IORequest request (IORequest::READ);
-
-	if (!os_file_read(request,
+	if (!os_file_read(IORequestRead,
 			  cursor->file, cursor->buf, cursor->buf_offset,
 			  to_read)) {
 		return(XB_FIL_CUR_ERROR);
 	}
 
 	posix_fadvise(cursor->file, cursor->buf_offset, to_read,
-			POSIX_FADV_DONTNEED);
+		      POSIX_FADV_DONTNEED);
 
 	cursor->buf_read = to_read;
 	cursor->buf_offset += to_read;
