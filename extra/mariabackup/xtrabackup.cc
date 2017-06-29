@@ -173,9 +173,6 @@ struct xb_filter_entry_struct{
 };
 typedef struct xb_filter_entry_struct	xb_filter_entry_t;
 
-static ulint		thread_nr[SRV_MAX_N_IO_THREADS + 6];
-static os_thread_id_t	thread_ids[SRV_MAX_N_IO_THREADS + 6];
-
 lsn_t checkpoint_lsn_start;
 lsn_t checkpoint_no_start;
 lsn_t log_copy_scanned_lsn;
@@ -2443,42 +2440,6 @@ io_watching_thread(
 	return(0);
 }
 
-/************************************************************************
-I/o-handler thread function. */
-static
-
-#ifndef __WIN__
-void*
-#else
-ulint
-#endif
-io_handler_thread(
-/*==============*/
-	void*	arg)
-{
-	ulint	segment;
-
-
-	segment = *((ulint*)arg);
-
- 	while (srv_shutdown_state != SRV_SHUTDOWN_EXIT_THREADS) {
-		fil_aio_wait(segment);
-	}
-
-	/* We count the number of threads in os_thread_exit(). A created
-	thread should always use that to exit and not use return() to exit.
-	The thread actually never comes here because it is exited in an
-	os_event_wait(). */
-
-	os_thread_exit(NULL);
-
-#ifndef __WIN__
-	return(NULL);				/* Not reached */
-#else
-	return(0);
-#endif
-}
-
 /**************************************************************************
 Datafiles copying thread.*/
 static
@@ -2628,21 +2589,12 @@ xb_check_if_open_tablespace(
 	return !check_if_skip_table(buf);
 }
 
-/************************************************************************
-Initializes the I/O and tablespace cache subsystems. */
+/** Initialize the tablespace cache subsystem. */
 static
 void
-xb_fil_io_init(void)
-/*================*/
+xb_fil_io_init()
 {
-	srv_n_file_io_threads = srv_n_read_io_threads;
-
-	os_aio_init(srv_n_read_io_threads,
-		    srv_n_write_io_threads,
-		    SRV_MAX_N_PENDING_SYNC_IOS);
-
 	fil_init(srv_file_per_table ? 50000 : 5000, LONG_MAX);
-
 	fsp_init();
 }
 
@@ -2917,7 +2869,6 @@ static
 dberr_t
 xb_load_tablespaces()
 {
-	ulint	i;
 	bool	create_new_db;
 	dberr_t	err;
 	ulint   sum_of_new_sizes;
@@ -2925,15 +2876,6 @@ xb_load_tablespaces()
 
 	ut_ad(srv_operation == SRV_OPERATION_BACKUP
 	      || srv_operation == SRV_OPERATION_RESTORE);
-
-	for (i = 0; i < srv_n_file_io_threads; i++) {
-		thread_nr[i] = i;
-
-		os_thread_create(io_handler_thread, thread_nr + i,
-				 thread_ids + i);
-    	}
-
-	os_thread_sleep(200000); /*0.2 sec*/
 
 	err = srv_sys_space.check_file_spec(&create_new_db, 0);
 
@@ -3007,42 +2949,11 @@ static
 void
 xb_data_files_close()
 {
-	ulint	i;
-
-	/* Shutdown the aio threads. This has been copied from
-	innobase_shutdown_for_mysql(). */
-
-	srv_shutdown_state = SRV_SHUTDOWN_EXIT_THREADS;
-
-	for (i = 0; i < 1000; i++) {
-		os_aio_wake_all_threads_at_shutdown();
-
-		if (os_thread_count == 0) {
-			break;
-		}
-		os_thread_sleep(10000);
-	}
-
-	if (i == 1000) {
-		msg("xtrabackup: Warning: %lu threads created by InnoDB"
-		    " had not exited at shutdown!\n",
-		    (ulong) os_thread_count);
-	}
-
-	os_aio_free();
-
+	ut_ad(!os_thread_count);
 	fil_close_all_files();
-
-	/* Free the double write data structures. */
 	if (buf_dblwr) {
 		buf_dblwr_free();
 	}
-
-	/* Reset srv_file_io_threads to its default value to avoid confusing
-	warning on --prepare in innobase_start_or_create_for_mysql()*/
-	srv_n_file_io_threads = 4;
-
-	srv_shutdown_state = SRV_SHUTDOWN_NONE;
 }
 
 /***********************************************************************
@@ -3646,6 +3557,10 @@ fail:
 	ulint	i;
 
 	xb_fil_io_init();
+	srv_n_file_io_threads = srv_n_read_io_threads;
+
+	os_aio_init(srv_n_read_io_threads, srv_n_write_io_threads,
+		    SRV_MAX_N_PENDING_SYNC_IOS);
 
 	log_sys_init();
 	log_init(srv_n_log_files);
