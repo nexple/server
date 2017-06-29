@@ -2562,23 +2562,7 @@ static void xtrabackup_destroy_datasinks(void)
 	ds_redo = NULL;
 }
 
-#define SRV_N_PENDING_IOS_PER_THREAD 	OS_AIO_N_PENDING_IOS_PER_THREAD
 #define SRV_MAX_N_PENDING_SYNC_IOS	100
-
-/************************************************************************
-@return TRUE if table should be opened. */
-static
-bool
-xb_check_if_open_tablespace(
-	const char*	db,
-	const char*	table)
-{
-	char buf[FN_REFLEN];
-
-	snprintf(buf, sizeof(buf), "%s/%s", db, table);
-
-	return !check_if_skip_table(buf);
-}
 
 /** Initialize the tablespace cache subsystem. */
 static
@@ -2615,6 +2599,9 @@ xb_load_single_table_tablespace(
 	/* Ignore .isl files on XtraBackup recovery. All tablespaces must be
 	local. */
 	if (is_remote && srv_operation == SRV_OPERATION_RESTORE) {
+		return;
+	}
+	if (check_if_skip_table(filname)) {
 		return;
 	}
 
@@ -2690,18 +2677,12 @@ xb_load_single_table_tablespace(
 	}
 }
 
-/********************************************************************//**
-At the server startup, if we need crash recovery, scans the database
-directories under the MySQL datadir, looking for .ibd files. Those files are
-single-table tablespaces. We need to know the space id in each of them so that
-we know into which file we should look to check the contents of a page stored
-in the doublewrite buffer, also to know where to apply log records where the
-space id is != 0.
+/** Scan the database directories under the MySQL datadir, looking for
+.ibd files and determining the space id in each of them.
 @return	DB_SUCCESS or error number */
-UNIV_INTERN
+static
 dberr_t
-xb_load_single_table_tablespaces(bool (*pred)(const char*, const char*))
-/*===================================*/
+xb_load_single_table_tablespaces()
 {
 	int		ret;
 	char*		dbpath		= NULL;
@@ -2729,26 +2710,19 @@ xb_load_single_table_tablespaces(bool (*pred)(const char*, const char*))
 	ret = fil_file_readdir_next_file(&err, fil_path_to_mysql_datadir, dir,
 					 &dbinfo);
 	while (ret == 0) {
-		ulint len;
+		size_t len = strlen(dbinfo.name);
 
 		/* General tablespaces are always at the first level of the
 		data home dir */
-		if (dbinfo.type == OS_FILE_TYPE_FILE &&
-		    strlen(dbinfo.name) > 4 &&
-		    strcmp(dbinfo.name + strlen(dbinfo.name) - 4, ".isl")
-				== 0 &&
-		    !(pred && !pred(".", dbinfo.name))) {
-			xb_load_single_table_tablespace(NULL, dbinfo.name,
-							true);
-		}
+		if (dbinfo.type == OS_FILE_TYPE_FILE && len > 4) {
+			bool is_isl = !strcmp(dbinfo.name + len - 4, ".isl");
+			bool is_ibd = !is_isl
+				&& !strcmp(dbinfo.name + len - 4, ".ibd");
 
-		if (dbinfo.type == OS_FILE_TYPE_FILE &&
-		    strlen(dbinfo.name) > 4 &&
-		    strcmp(dbinfo.name + strlen(dbinfo.name) - 4, ".ibd")
-				== 0 &&
-		    !(pred && !pred(".", dbinfo.name))) {
-			xb_load_single_table_tablespace(NULL, dbinfo.name,
-							false);
+			if (is_isl || is_ibd) {
+				xb_load_single_table_tablespace(
+					NULL, dbinfo.name, is_isl);
+			}
 		}
 
 		if (dbinfo.type == OS_FILE_TYPE_FILE
@@ -2789,41 +2763,33 @@ xb_load_single_table_tablespaces(bool (*pred)(const char*, const char*))
 			/* We found a database directory; loop through it,
 			looking for possible .ibd files in it */
 
-			ret = fil_file_readdir_next_file(&err, dbpath, dbdir,
-							 &fileinfo);
-			while (ret == 0) {
-				bool is_remote;
-
+			for (ret = fil_file_readdir_next_file(&err, dbpath,
+							      dbdir,
+							      &fileinfo);
+			     ret == 0;
+			     ret = fil_file_readdir_next_file(&err, dbpath,
+							      dbdir,
+							      &fileinfo)) {
 				if (fileinfo.type == OS_FILE_TYPE_DIR) {
-					goto next_file_item;
+					continue;
 				}
 
-				is_remote = strcmp(fileinfo.name
-					  + strlen(fileinfo.name) - 4,
-					  ".isl") == 0;
+				size_t len = strlen(fileinfo.name);
 
 				/* We found a symlink or a file */
-				if (strlen(fileinfo.name) > 4
-				    && (0 == strcmp(fileinfo.name
-						   + strlen(fileinfo.name) - 4,
-						   ".ibd"))
-				    && (!pred
-					|| pred(dbinfo.name, fileinfo.name))) {
+				if (len > 4
+				    && !strcmp(fileinfo.name + len - 4,
+					       ".ibd")) {
 					xb_load_single_table_tablespace(
 						dbinfo.name, fileinfo.name,
-						is_remote);
+						false);
 				}
-next_file_item:
-				ret = fil_file_readdir_next_file(&err,
-								 dbpath, dbdir,
-								 &fileinfo);
 			}
 
 			if (0 != os_file_closedir(dbdir)) {
-				fputs("InnoDB: Warning: could not"
-				      " close database directory ", stderr);
-				fputs(dbpath, stderr);
-				putc('\n', stderr);
+				fprintf(stderr, "InnoDB: Warning: could not"
+				      " close database directory %s\n",
+					dbpath);
 
 				err = DB_ERROR;
 			}
@@ -2911,7 +2877,7 @@ xb_load_tablespaces()
 
 	msg("xtrabackup: Generating a list of tablespaces\n");
 
-	err = xb_load_single_table_tablespaces(xb_check_if_open_tablespace);
+	err = xb_load_single_table_tablespaces();
 	if (err != DB_SUCCESS) {
 		return(err);
 	}
