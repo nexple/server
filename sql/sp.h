@@ -44,8 +44,10 @@ enum stored_procedure_type
 {
   TYPE_ENUM_FUNCTION=1,
   TYPE_ENUM_PROCEDURE=2,
-  TYPE_ENUM_TRIGGER=3,
-  TYPE_ENUM_PROXY=4
+  TYPE_ENUM_PACKAGE=3,
+  TYPE_ENUM_PACKAGE_BODY=4,
+  TYPE_ENUM_TRIGGER=5,
+  TYPE_ENUM_PROXY=6
 };
 
 
@@ -57,6 +59,8 @@ stored_procedure_type_to_str(enum stored_procedure_type type)
   case TYPE_ENUM_FUNCTION:  return "FUNCTION";
   case TYPE_ENUM_TRIGGER:   return "TRIGGER";
   case TYPE_ENUM_PROXY:     return "PROXY";
+  case TYPE_ENUM_PACKAGE:   return "PACKAGE";
+  case TYPE_ENUM_PACKAGE_BODY: return "PACKAGE BODY";
   }
   DBUG_ASSERT(0);
   return "UNKNOWN_STORED_"; 
@@ -144,10 +148,12 @@ bool
 sp_create_routine(THD *thd, stored_procedure_type type, sp_head *sp);
 
 bool
-sp_create_package(THD *thd, const sp_name *name, DDL_options_st ddl_options);
-
-bool
-sp_package_exists_or_error(THD *thd, const sp_name *name, bool if_exists);
+sp_create_package(THD *thd,
+                  stored_procedure_type type,
+                  const sp_name *name,
+                  const class Package_body *sp,
+                  DDL_options_st ddl_options,
+                  bool *already_exists);
 
 int
 sp_update_routine(THD *thd, stored_procedure_type type, const sp_name *name,

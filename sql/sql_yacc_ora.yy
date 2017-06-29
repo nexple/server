@@ -2058,36 +2058,29 @@ create:
           server_def
           { }
         | CREATE PACKAGE_SYM opt_if_not_exists ident sp_tail_is
+          remember_name
           {
-            LEX *lex= Lex;
-            lex->name= $4;
-            lex->create_info.default_table_charset= NULL;
-            lex->create_info.used_fields= 0;
-            if (lex->set_command_with_check(SQLCOM_CREATE_PACKAGE, 0, $3))
-               MYSQL_YYABORT;
-            if (!(lex->package_body= new (thd->mem_root) Package_body(lex)))
+            if (Lex->create_package_start(thd, SQLCOM_CREATE_PACKAGE, $4, $3))
               MYSQL_YYABORT;
           }
           opt_package_declaration_element_list END opt_package_name
+          remember_end
           {
-            if ($9.str && strcmp($9.str, $4.str))
-              my_yyabort_error((ER_END_IDENTIFIER_DOES_NOT_MATCH, MYF(0),
-                                $9.str, $4.str));
+            if (Lex->create_package_finalize(thd, $4, $10, $6, $11))
+              MYSQL_YYABORT;
           }
-        | CREATE PACKAGE_SYM BODY_SYM ident sp_tail_is
+        | CREATE PACKAGE_SYM BODY_SYM opt_if_not_exists ident sp_tail_is
+          remember_name
           {
-            LEX *lex= Lex;
-            lex->name= $4;
-            lex->sql_command= SQLCOM_CREATE_PACKAGE_BODY;
-            lex->definer= NULL;
-            if (!(lex->package_body= new (thd->mem_root) Package_body(lex)))
+            if (Lex->create_package_start(thd, SQLCOM_CREATE_PACKAGE_BODY,
+                                          $5, $4))
               MYSQL_YYABORT;
           }
           package_implementation_element_list END opt_package_name
+          remember_end
           {
-            if ($9.str && strcmp($9.str, $4.str))
-              my_yyabort_error((ER_END_IDENTIFIER_DOES_NOT_MATCH, MYF(0),
-                                $9.str, $4.str));
+            if (Lex->create_package_finalize(thd, $5, $11, $7, $12))
+              MYSQL_YYABORT;
           }
         ;
 
@@ -12472,11 +12465,11 @@ drop:
             lex->name= $4;
             lex->set_command(SQLCOM_DROP_PACKAGE, $3);
           }
-        | DROP PACKAGE_SYM BODY_SYM ident
+        | DROP PACKAGE_SYM BODY_SYM opt_if_exists ident
           {
             LEX *lex= Lex;
-            lex->name= $4;
-            lex->sql_command= SQLCOM_DROP_PACKAGE_BODY;
+            lex->name= $5;
+            lex->set_command(SQLCOM_DROP_PACKAGE_BODY, $4);
           }
         | DROP FUNCTION_SYM opt_if_exists ident '.' ident
           {

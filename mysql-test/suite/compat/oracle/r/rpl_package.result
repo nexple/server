@@ -23,7 +23,7 @@ connection slave;
 SELECT * FROM mysql.proc WHERE db='test' AND name='pack';
 db	test
 name	pack
-type	PROCEDURE
+type	PACKAGE
 specific_name	pack
 language	SQL
 sql_data_access	CONTAINS_SQL
@@ -31,7 +31,39 @@ is_deterministic	NO
 security_type	DEFINER
 param_list	
 returns	
-body	AS BEGIN NULL; END
+body	AS
+FUNCTION f1 RETURN INT;
+PROCEDURE p1;
+END
+definer	root@localhost
+created	#
+modified	#
+sql_mode	PIPES_AS_CONCAT,ANSI_QUOTES,IGNORE_SPACE,ORACLE,NO_KEY_OPTIONS,NO_TABLE_OPTIONS,NO_FIELD_OPTIONS,NO_AUTO_CREATE_USER
+comment	
+character_set_client	latin1
+collation_connection	latin1_swedish_ci
+db_collation	latin1_swedish_ci
+body_utf8	AS BEGIN NULL; END
+db	test
+name	pack
+type	PACKAGE BODY
+specific_name	pack
+language	SQL
+sql_data_access	CONTAINS_SQL
+is_deterministic	NO
+security_type	DEFINER
+param_list	
+returns	
+body	AS
+FUNCTION f1 RETURN INT AS
+BEGIN
+RETURN 10;
+END;
+PROCEDURE p1 AS
+BEGIN
+SELECT f1();
+END;
+END
 definer	root@localhost
 created	#
 modified	#

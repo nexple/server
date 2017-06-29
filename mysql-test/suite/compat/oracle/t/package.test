@@ -222,6 +222,24 @@ CREATE PACKAGE BODY test2 AS
 END;
 $$
 DELIMITER ;$$
+
+# This should do nothing and return a warning
+DELIMITER $$;
+CREATE PACKAGE BODY IF NOT EXISTS test2 AS
+  FUNCTION f1 RETURN INT AS BEGIN RETURN 20; END;
+  FUNCTION f2(a INT) RETURN INT AS BEGIN RETURN f1()+a; END;
+  PROCEDURE p1 AS
+  BEGIN
+    SELECT f2(0);
+  END;
+  PROCEDURE p2(a INT) AS
+  BEGIN
+    SELECT f2(a);
+  END;
+END;
+$$
+DELIMITER ;$$
+
 SELECT test2.f1();
 SELECT test2.f2(1);
 CALL test2.p1();
@@ -242,12 +260,9 @@ SELECT test2.f2();
 --error ER_SP_DOES_NOT_EXIST
 CALL test2.p1();
 
---error ER_PARSE_ERROR
 DROP PACKAGE BODY IF EXISTS test2;
 
---echo # "DROP PACKAGE BODY" now does sp_drop_db_routines.
---echo # So dropping a body which was already dropped before returns no errors.
-
+--error ER_SP_DOES_NOT_EXIST
 DROP PACKAGE BODY test2;
 
 

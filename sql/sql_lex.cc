@@ -865,6 +865,7 @@ void Package_body::cleanup()
     lex_end(lex);
     delete lex;
   }
+  m_body= null_clex_str;
 }
 
 
@@ -7097,6 +7098,40 @@ bool LEX::sp_add_cfetch(THD *thd, const LEX_CSTRING *name)
   i= new (thd->mem_root)
     sp_instr_cfetch(sphead->instructions(), spcont, offset);
   if (i == NULL || sphead->add_instr(i))
+    return true;
+  return false;
+}
+
+
+bool LEX::create_package_start(THD *thd,
+                               enum_sql_command command,
+                               const LEX_CSTRING &name_arg,
+                               DDL_options_st options)
+{
+  name= name_arg;
+  definer= NULL;
+  if (set_command_with_check(command, options))
+    return true;
+  if (!(package_body= new (thd->mem_root) Package_body(this)))
+    return true;
+  return false;
+}
+
+
+bool LEX::create_package_finalize(THD *thd,
+                                  const LEX_CSTRING &name,
+                                  const LEX_CSTRING &name2,
+                                  const char *body_start,
+                                  const char *body_end)
+{
+  if (name2.str && strcmp(name2.str, name.str))
+  {
+    my_error(ER_END_IDENTIFIER_DOES_NOT_MATCH, MYF(0), name2.str, name.str);
+    return true;
+  }
+  package_body->m_body.length= body_end - body_start;
+  if (!(package_body->m_body.str= thd->strmake(body_start,
+                                               package_body->m_body.length)))
     return true;
   return false;
 }

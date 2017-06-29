@@ -1276,7 +1276,11 @@ sp_create_routine(THD *thd, stored_procedure_type type, sp_head *sp)
   }
 
 log:
-  if (mysql_bin_log.is_open())
+  /*
+    Don't log CREATE statement for package routines.
+    Package routines are logged all together inside CREATE PACKAGE BODY.
+  */
+  if (!lex->package_body && mysql_bin_log.is_open())
   {
     thd->clear_error();
 
@@ -1322,28 +1326,36 @@ done:
 
 static bool
 show_create_package(THD *thd, String *buf,
+                    const LEX_CSTRING &type,
                     const sp_name *spname,
+                    const LEX_CSTRING &body,
                     DDL_options_st ddl_options)
 {
   return
     buf->append(STRING_WITH_LEN("CREATE ")) ||
     (ddl_options.or_replace() &&
      buf->append(STRING_WITH_LEN("OR REPLACE "))) ||
-    //TODO: append_definer(thd, buf, definer_user, definer_host);
-    buf->append(STRING_WITH_LEN("PACKAGE ")) ||
+    //TODO: append_definer(thd, buf, definer_user, definer_host) ||
+    buf->append(type.str, type.length) ||
+    buf->append(" ", 1) ||
     (ddl_options.if_not_exists() &&
      buf->append(STRING_WITH_LEN("IF NOT EXISTS "))) ||
     append_identifier(thd, buf, spname->m_name.str, spname->m_name.length) ||
-    buf->append(STRING_WITH_LEN(" AS END;"));
+    buf->append(" ", 1) ||
+    buf->append(body.str, body.length);
 }
 
 
 bool
-sp_create_package(THD *thd, const sp_name *spname, DDL_options_st ddl_options)
+sp_create_package(THD *thd,
+                  stored_procedure_type type,
+                  const sp_name *spname,
+                  const Package_body *sp,
+                  DDL_options_st ddl_options,
+                  bool *already_exists)
 {
   bool ret= TRUE;
   TABLE *table;
-  stored_procedure_type type= TYPE_ENUM_PROCEDURE;
   //char definer_buf[USER_HOST_BUFF_SIZE];
   //LEX_STRING definer;
   sql_mode_t saved_mode= thd->variables.sql_mode;
@@ -1357,6 +1369,7 @@ sp_create_package(THD *thd, const sp_name *spname, DDL_options_st ddl_options)
   DBUG_ENTER("sp_create_package");
   DBUG_PRINT("enter", ("name: %.*s",
                        (int) spname->m_name.length, spname->m_name.str));
+  *already_exists= false;
   /* Grab an exclusive MDL lock. */
   if (lock_object_name(thd, mdl_type, spname->m_db.str, spname->m_name.str))
   {
@@ -1390,9 +1403,22 @@ sp_create_package(THD *thd, const sp_name *spname, DDL_options_st ddl_options)
   }
   else
   {
+    /*
+      "CREATE PACKAGE BODY" is allowed only if "CREATE PACKAGE"
+      was done earlier for the same package name.
+    */
+    if (type == TYPE_ENUM_PACKAGE_BODY &&
+        db_find_routine_aux(thd, TYPE_ENUM_PACKAGE, spname, table) != SP_OK)
+    {
+      my_error(ER_SP_DOES_NOT_EXIST, MYF(0),
+               "PACKAGE", ErrConvDQName(spname).ptr());
+      goto done;
+    }
+
     /* Checking if the routine already exists */
     if (db_find_routine_aux(thd, type, spname, table) == SP_OK)
     {
+      *already_exists= true;
       if (ddl_options.or_replace())
       {
         if ((ret= sp_drop_routine_internal(thd, type, spname, table)))
@@ -1403,7 +1429,8 @@ sp_create_package(THD *thd, const sp_name *spname, DDL_options_st ddl_options)
         push_warning_printf(thd, Sql_condition::WARN_LEVEL_NOTE,
                             ER_SP_ALREADY_EXISTS,
                             ER_THD(thd, ER_SP_ALREADY_EXISTS),
-                            "PACKAGE", spname->m_name.str);
+                            stored_procedure_type_to_str(type),
+                            spname->m_name.str);
 
         ret= FALSE;
         goto log;
@@ -1438,11 +1465,11 @@ sp_create_package(THD *thd, const sp_name *spname, DDL_options_st ddl_options)
       my_error(ER_TOO_LONG_IDENT, MYF(0), spname->m_name.str);
       goto done;
     }
-    //if (sp->m_body.length > table->field[MYSQL_PROC_FIELD_BODY]->field_length)
-    //{
-    //  my_error(ER_TOO_LONG_BODY, MYF(0), sp->m_name.str);
-    //  goto done;
-    //}
+    if (sp->m_body.length > table->field[MYSQL_PROC_FIELD_BODY]->field_length)
+    {
+      my_error(ER_TOO_LONG_BODY, MYF(0), spname->m_name.str);
+      goto done;
+    }
 
     store_failed=
       table->field[MYSQL_PROC_FIELD_DB]->
@@ -1493,8 +1520,7 @@ sp_create_package(THD *thd, const sp_name *spname, DDL_options_st ddl_options)
 
     store_failed= store_failed ||
       table->field[MYSQL_PROC_FIELD_BODY]->
-        store(C_STRING_WITH_LEN("AS BEGIN NULL; END"),
-              system_charset_info);
+        store(sp->m_body.str, sp->m_body.length, &my_charset_bin);
 
     store_failed= store_failed ||
       table->field[MYSQL_PROC_FIELD_DEFINER]->
@@ -1564,7 +1590,11 @@ log:
     thd->clear_error();
 
     StringBuffer<128> log_query(system_charset_info);
-    if (show_create_package(thd, &log_query, spname, ddl_options))
+    LEX_CSTRING type_str;
+    type_str.str= stored_procedure_type_to_str(type);
+    type_str.length= strlen(type_str.str);
+    if (show_create_package(thd, &log_query, type_str, spname,
+                            sp->m_body, ddl_options))
     {
       my_error(ER_OUT_OF_RESOURCES, MYF(0));
       goto done;
@@ -1620,7 +1650,9 @@ sp_drop_routine(THD *thd, stored_procedure_type type, const sp_name *name)
 		       type, (int) name->m_name.length, name->m_name.str));
 
   DBUG_ASSERT(type == TYPE_ENUM_PROCEDURE ||
-              type == TYPE_ENUM_FUNCTION);
+              type == TYPE_ENUM_FUNCTION ||
+              type == TYPE_ENUM_PACKAGE ||
+              type == TYPE_ENUM_PACKAGE_BODY);
 
   /* Grab an exclusive MDL lock. */
   if (lock_object_name(thd, mdl_type, name->m_db.str, name->m_name.str))
@@ -1628,6 +1660,19 @@ sp_drop_routine(THD *thd, stored_procedure_type type, const sp_name *name)
 
   if (!(table= open_proc_table_for_update(thd)))
     DBUG_RETURN(SP_OPEN_TABLE_FAILED);
+
+  if (type == TYPE_ENUM_PACKAGE)
+  {
+    /*
+      If we're dropping a PACKAGE,
+      we should also delete its PACKAGE BODY record.
+      TODO: check error code
+    */
+    if ((ret= db_find_routine_aux(thd, TYPE_ENUM_PACKAGE_BODY,
+                                  name, table)) == SP_OK)
+      ret= sp_drop_routine_internal(thd, TYPE_ENUM_PACKAGE_BODY,
+                                    name, table);
+  }
 
   if ((ret= db_find_routine_aux(thd, type, name, table)) == SP_OK)
     ret= sp_drop_routine_internal(thd, type, name, table);
@@ -2247,39 +2292,7 @@ sp_check_if_known_routine(THD *thd,
 
 static bool sp_check_if_package_exists(THD *thd, const sp_name *name)
 {
-  return sp_check_if_known_routine(thd, name, TYPE_ENUM_PROCEDURE);
-}
-
-
-/**
-  Check if a package exists.
-  @param - spname    - the package name
-  @param - if_exists - tells of "IF EXISTS" clause was specified.
-
-  @returns false   - on success (the package exists)
-  @returns true    - on error (the package does not exists)
-
-  In case if the package does not exist, an error or a warning is issued,
-  depending on the "if_exists" parameter.
-*/
-
-bool sp_package_exists_or_error(THD *thd, const sp_name *spname, bool if_exists)
-{
-  if (sp_check_if_package_exists(thd, spname))
-    return false; // Package exists
-  if (!if_exists)
-  {
-    my_error(ER_SP_DOES_NOT_EXIST, MYF(0),
-             "PACKAGE", ErrConvDQName(spname).ptr());
-  }
-  else
-  {
-    push_warning_printf(thd, Sql_condition::WARN_LEVEL_NOTE,
-                        ER_SP_DOES_NOT_EXIST,
-                        ER_THD(thd, ER_SP_ALREADY_EXISTS),
-                        "PACKAGE", ErrConvDQName(spname).ptr());
-  }
-  return true; // Package does not exist
+  return sp_check_if_known_routine(thd, name, TYPE_ENUM_PACKAGE);
 }
 
 

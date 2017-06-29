@@ -2595,8 +2595,10 @@ class Package_body: public Sql_alloc
 public:
   List<LEX> m_lex_list;
   struct LEX *m_top_level_lex;
+  LEX_CSTRING m_body;
   Package_body(LEX *top_level_lex)
-   :m_top_level_lex(top_level_lex)
+   :m_top_level_lex(top_level_lex),
+    m_body(null_clex_str)
   {
     m_lex_list.elements= 0;
   }
@@ -3163,6 +3165,15 @@ public:
       return NULL;
     return make_sp_head_no_recursive(thd, name, type);
   }
+  bool create_package_start(THD *thd,
+                            enum_sql_command command,
+                            const LEX_CSTRING &name,
+                            DDL_options_st options);
+  bool create_package_finalize(THD *thd,
+                               const LEX_CSTRING &name,
+                               const LEX_CSTRING &name2,
+                               const char *body_start,
+                               const char *body_end);
   bool init_internal_variable(struct sys_var_with_base *variable,
                              const LEX_CSTRING *name);
   bool init_internal_variable(struct sys_var_with_base *variable,

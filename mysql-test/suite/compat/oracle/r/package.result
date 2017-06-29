@@ -16,7 +16,7 @@ DROP PACKAGE IF EXISTS test2;
 Warnings:
 Note	1305	PACKAGE test.test2 does not exist
 DROP PACKAGE BODY test2;
-ERROR 42000: PACKAGE test.test2 does not exist
+ERROR 42000: PACKAGE BODY test.test2 does not exist
 #
 # PACKAGE and PS
 #
@@ -115,7 +115,7 @@ Note	1585	This function 'concat' has the same name as a native function
 SELECT * FROM mysql.proc WHERE db='test' AND name='test2';
 db	test
 name	test2
-type	PROCEDURE
+type	PACKAGE
 specific_name	test2
 language	SQL
 sql_data_access	CONTAINS_SQL
@@ -123,7 +123,13 @@ is_deterministic	NO
 security_type	DEFINER
 param_list	
 returns	
-body	AS BEGIN NULL; END
+body	AS
+FUNCTION f1 RETURN INT DETERMINISTIC;
+FUNCTION f2(a INT) RETURN INT;
+FUNCTION concat RETURN INT;
+PROCEDURE p1;
+PROCEDURE p2(a INT);
+END
 definer	root@localhost
 created	#
 modified	#
@@ -138,7 +144,7 @@ SPECIFIC_NAME	test2
 ROUTINE_CATALOG	def
 ROUTINE_SCHEMA	test
 ROUTINE_NAME	test2
-ROUTINE_TYPE	PROCEDURE
+ROUTINE_TYPE	PACKAGE
 DATA_TYPE	
 CHARACTER_MAXIMUM_LENGTH	NULL
 CHARACTER_OCTET_LENGTH	NULL
@@ -184,6 +190,21 @@ SELECT f2(a);
 END;
 END;
 $$
+CREATE PACKAGE BODY IF NOT EXISTS test2 AS
+FUNCTION f1 RETURN INT AS BEGIN RETURN 20; END;
+FUNCTION f2(a INT) RETURN INT AS BEGIN RETURN f1()+a; END;
+PROCEDURE p1 AS
+BEGIN
+SELECT f2(0);
+END;
+PROCEDURE p2(a INT) AS
+BEGIN
+SELECT f2(a);
+END;
+END;
+$$
+Warnings:
+Note	1304	PACKAGE BODY test2 already exists
 SELECT test2.f1();
 test2.f1()
 10
@@ -428,10 +449,10 @@ ERROR 42000: FUNCTION test.test2.f2 does not exist
 CALL test2.p1();
 ERROR 42000: PROCEDURE test.test2.p1 does not exist
 DROP PACKAGE BODY IF EXISTS test2;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'IF EXISTS test2' at line 1
-# "DROP PACKAGE BODY" now does sp_drop_db_routines.
-# So dropping a body which was already dropped before returns no errors.
+Warnings:
+Note	1305	PACKAGE BODY test.test2 does not exist
 DROP PACKAGE BODY test2;
+ERROR 42000: PACKAGE BODY test.test2 does not exist
 DROP PACKAGE test2;
 #
 # Package routines accessing tables
