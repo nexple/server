@@ -251,8 +251,6 @@ my_bool innobase_locks_unsafe_for_binlog;
 my_bool innobase_rollback_on_timeout;
 my_bool innobase_create_status_file;
 
-static char *internal_innobase_data_file_path	= NULL;
-
 /* The following counter is used to convey information to InnoDB
 about server activity: in selects it is not sensible to call
 srv_active_wake_master_thread after each fetch or search, we only do
@@ -1540,20 +1538,13 @@ error:
 	return(TRUE);
 }
 
-static void innodb_end()
-{
-	innodb_shutdown();
-	free(internal_innobase_data_file_path);
-	internal_innobase_data_file_path = NULL;
-}
-
 static bool innodb_init()
 {
 	dberr_t err = innobase_start_or_create_for_mysql();
 	if (err != DB_SUCCESS) {
 		msg("xtrabackup: innodb_init() returned %d (%s).\n",
 		    err, ut_strerr(err));
-		innodb_end();
+		innodb_shutdown();
 		return(TRUE);
 	}
 
@@ -4926,8 +4917,6 @@ void
 innodb_free_param()
 {
 	srv_sys_space.shutdown();
-	free(internal_innobase_data_file_path);
-	internal_innobase_data_file_path = NULL;
 	free_tmpdir(&mysql_tmpdir_list);
 }
 
@@ -5347,7 +5336,7 @@ next_node:
 	else if (ok) xb_write_galera_info(xtrabackup_incremental);
 #endif
 
-	innodb_end();
+	innodb_shutdown();
 	innodb_free_param();
 
 	/* output to metadata file */
