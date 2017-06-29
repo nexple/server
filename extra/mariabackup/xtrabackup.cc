@@ -244,7 +244,7 @@ char*	innobase_data_file_path 		= NULL;
 affects Windows: */
 char*	innobase_unix_file_flush_method		= NULL;
 
-my_bool innobase_use_doublewrite    = TRUE;
+my_bool innobase_use_doublewrite;
 my_bool innobase_use_large_pages;
 my_bool	innobase_file_per_table;
 my_bool innobase_locks_unsafe_for_binlog;
@@ -941,9 +941,10 @@ struct my_option xb_server_options[] =
   {"innodb_data_home_dir", OPT_INNODB_DATA_HOME_DIR,
    "The common part for InnoDB table spaces.", &innobase_data_home_dir,
    &innobase_data_home_dir, 0, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-  {"innodb_doublewrite", OPT_INNODB_DOUBLEWRITE, "Enable InnoDB doublewrite buffer (enabled by default). \
-Disable with --skip-innodb-doublewrite.", (G_PTR*) &innobase_use_doublewrite,
-   (G_PTR*) &innobase_use_doublewrite, 0, GET_BOOL, NO_ARG, 1, 0, 0, 0, 0, 0},
+  {"innodb_doublewrite", OPT_INNODB_DOUBLEWRITE,
+   "Enable InnoDB doublewrite buffer during --prepare.",
+   (G_PTR*) &innobase_use_doublewrite,
+   (G_PTR*) &innobase_use_doublewrite, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"innodb_io_capacity", OPT_INNODB_IO_CAPACITY,
    "Number of IOPs the server can do. Tunes the background IO rate",
    (G_PTR*) &srv_io_capacity, (G_PTR*) &srv_io_capacity,
