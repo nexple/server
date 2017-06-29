@@ -2939,7 +2939,7 @@ innodb_shutdown()
 
 	pars_lexer_close();
 	recv_sys_close();
-	log_mem_free();
+
 	ut_ad(buf_pool_ptr || !srv_was_started);
 	if (buf_pool_ptr) {
 		buf_pool_free(srv_buf_pool_instances);

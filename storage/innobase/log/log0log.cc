@@ -2242,11 +2242,9 @@ log_group_close_all(void)
 	log_group_close(&log_sys->log);
 }
 
-/********************************************************//**
-Shutdown the log system but do not release all the memory. */
+/** Shut down the redo log subsystem. */
 void
-log_shutdown(void)
-/*==============*/
+log_shutdown()
 {
 	log_group_close_all();
 
@@ -2270,14 +2268,6 @@ log_shutdown(void)
 	}
 
 	recv_sys_close();
-}
-
-/********************************************************//**
-Free the log system data structures. */
-void
-log_mem_free(void)
-/*==============*/
-{
 	ut_free(log_sys);
 	log_sys = NULL;
 }
